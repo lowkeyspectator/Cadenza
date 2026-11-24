@@ -26,6 +26,7 @@ enum LyricsService {
     }
 
     private struct Entry: Decodable {
+        let albumName: String?
         let duration: Double?
         let instrumental: Bool?
         let plainLyrics: String?
@@ -65,7 +66,15 @@ enum LyricsService {
         }
 
         if reference.isEmpty {
-            let best = candidates.first { !($0.syncedLyrics ?? "").isEmpty } ?? candidates.first
+            // Nothing to check the words against, so only accept a candidate from the same album.
+            // Film songs in particular exist in several languages under one title and artist;
+            // showing no lyrics is better than showing another language's.
+            let album = fold(track.album)
+            let sameAlbum = candidates.filter {
+                let theirs = fold($0.albumName ?? "")
+                return !album.isEmpty && !theirs.isEmpty && (theirs.contains(album) || album.contains(theirs))
+            }
+            let best = sameAlbum.first { !($0.syncedLyrics ?? "").isEmpty } ?? sameAlbum.first
             return best.flatMap(result(from:)) ?? .notFound
         }
 
@@ -79,6 +88,11 @@ enum LyricsService {
             return .synced(lines)
         }
         return .plain(reference)
+    }
+
+    private static func fold(_ s: String) -> String {
+        s.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+            .components(separatedBy: CharacterSet.alphanumerics.inverted).joined()
     }
 
     private static func text(of entry: Entry) -> String {
@@ -167,6 +181,8 @@ final class LyricsModel: ObservableObject {
     @Published private(set) var status: Status = .idle
     @Published private(set) var lines: [LyricLine] = []
     @Published private(set) var currentIndex: Int?
+    /// Where the lyrics on screen came from, shown under them.
+    @Published private(set) var source = ""
 
     var onSeek: ((Double) -> Void)?
     /// Returns YouTube Music's own lyrics for a video id, or nil when it has none.
@@ -182,6 +198,7 @@ final class LyricsModel: ObservableObject {
         if sameSong && status != .idle { return }
 
         task?.cancel()
+        source = ""
         lines = []
         currentIndex = nil
         guard !new.title.isEmpty, new.duration > 0 else { status = .idle; return }
@@ -193,16 +210,21 @@ final class LyricsModel: ObservableObject {
             if Task.isCancelled { return }
             let result = await LyricsService.fetch(new, reference: reference)
             if Task.isCancelled { return }
-            self?.apply(result)
+            self?.apply(result, checked: !(reference ?? "").isEmpty)
         }
     }
 
-    private func apply(_ result: LyricsService.Result) {
+    private func apply(_ result: LyricsService.Result, checked: Bool) {
         switch result {
-        case .synced(let l): lines = l; status = .synced
-        case .plain(let text): status = .plain(text)
-        case .instrumental: status = .instrumental
-        case .notFound: status = .notFound
+        case .synced(let l):
+            lines = l; status = .synced
+            source = checked ? "Timed lyrics from LRCLIB, matched to YouTube Music’s lyrics"
+                             : "Timed lyrics from LRCLIB (matched by title, artist and album)"
+        case .plain(let text):
+            status = .plain(text)
+            source = checked ? "Lyrics from YouTube Music" : "Lyrics from LRCLIB"
+        case .instrumental: status = .instrumental; source = ""
+        case .notFound: status = .notFound; source = ""
         }
     }
 
@@ -242,7 +264,8 @@ struct LyricsView: View {
             Divider()
             content
             Divider()
-            Text("Lyrics from LRCLIB and YouTube Music").font(.caption2).foregroundStyle(.tertiary)
+            Text(model.source.isEmpty ? " " : model.source).font(.caption2).foregroundStyle(.tertiary)
+                .lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 20).padding(.vertical, 8)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
