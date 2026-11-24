@@ -38,8 +38,11 @@ Sign in with your Google password plus whatever second step your account uses (p
 **Passkeys and Touch ID are not available inside the app.** macOS only lets an embedded web view use
 passkeys if the app is a registered web browser (an entitlement Apple grants to browser vendors) or is
 listed by the website itself as one of its own apps. Neither is possible for an unofficial client, and
-a locally built, ad-hoc signed app cannot carry the entitlement at all. If Google offers a passkey, choose
-**Try another way**.
+a locally built, ad-hoc signed app cannot carry the entitlement at all.
+
+Left alone, Google would still pick the passkey step and fail with "Something went wrong… Make sure
+Bluetooth is on". To avoid that, the app hides the passkey API from Google's sign-in pages so Google offers
+your other sign-in methods instead. If a passkey prompt still appears, choose **Try another way**.
 
 ## Build
 

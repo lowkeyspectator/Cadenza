@@ -32,6 +32,18 @@ final class PlayerWindowController: NSWindowController, NSToolbarDelegate, WKNav
         config.userContentController.addUserScript(
             WKUserScript(source: source, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
 
+        // macOS refuses passkeys in an embedded web view, but the page still sees the WebAuthn API,
+        // so Google picks the passkey step and it fails ("Something went wrong… Bluetooth").
+        // Hiding the API on Google's sign-in pages makes Google offer password / phone prompt instead.
+        let noPasskeys = """
+            if (/(^|\\.)google\\.[a-z.]+$/.test(location.hostname)) {
+              try { Object.defineProperty(window, 'PublicKeyCredential', { value: undefined, configurable: true }); } catch (e) {}
+              try { Object.defineProperty(Navigator.prototype, 'credentials', { get: () => undefined, configurable: true }); } catch (e) {}
+            }
+            """
+        config.userContentController.addUserScript(
+            WKUserScript(source: noPasskeys, injectionTime: .atDocumentStart, forMainFrameOnly: false))
+
         webView = WKWebView(frame: .zero, configuration: config)
         webView.customUserAgent = Self.userAgent
         webView.allowsBackForwardNavigationGestures = true
