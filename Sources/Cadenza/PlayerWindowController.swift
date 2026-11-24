@@ -1,9 +1,6 @@
 import AppKit
+import SwiftUI
 import WebKit
-
-enum PlaybackMode: String {
-    case audio, video, none
-}
 
 final class PlayerWindowController: NSWindowController, NSToolbarDelegate, WKNavigationDelegate,
     WKUIDelegate, WKScriptMessageHandler
@@ -16,10 +13,11 @@ final class PlayerWindowController: NSWindowController, NSToolbarDelegate, WKNav
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Safari/605.1.15"
 
     let webView: WKWebView
-    private(set) var mode: PlaybackMode = .none
-    private(set) var canSwitchMode = false
+    let lyrics = LyricsModel()
 
-    private var modeControl: NSSegmentedControl!
+    private let lyricsPanel: NSView
+    private var webTrailingToPanel: NSLayoutConstraint!
+    private var webTrailingToEdge: NSLayoutConstraint!
     private var titleObservation: NSKeyValueObservation?
 
     init() {
@@ -29,8 +27,8 @@ final class PlayerWindowController: NSWindowController, NSToolbarDelegate, WKNav
         config.preferences.isElementFullscreenEnabled = true
         config.allowsAirPlayForMediaPlayback = true
 
-        let maxQuality = UserDefaults.standard.bool(forKey: Prefs.maxQuality)
-        let source = bridgeScript + "\nwindow.__cadenza.maxQuality = \(maxQuality);"
+        let audioOnly = UserDefaults.standard.bool(forKey: Prefs.audioOnly)
+        let source = bridgeScript + "\nwindow.__cadenza.audioOnly = \(audioOnly);"
         config.userContentController.addUserScript(
             WKUserScript(source: source, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
 
@@ -53,12 +51,34 @@ final class PlayerWindowController: NSWindowController, NSToolbarDelegate, WKNav
         window.center()
         window.setFrameAutosaveName("PlayerWindow")
 
+        lyricsPanel = NSHostingView(rootView: LyricsView(model: lyrics))
+
         super.init(window: window)
+
+        lyrics.onSeek = { [weak self] seconds in self?.run("seek(\(seconds))") }
 
         config.userContentController.add(self, name: "cadenza")
         webView.navigationDelegate = self
         webView.uiDelegate = self
-        window.contentView = webView
+
+        let container = NSView()
+        webView.translatesAutoresizingMaskIntoConstraints = false
+        lyricsPanel.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(webView)
+        container.addSubview(lyricsPanel)
+        webTrailingToPanel = webView.trailingAnchor.constraint(equalTo: lyricsPanel.leadingAnchor)
+        webTrailingToEdge = webView.trailingAnchor.constraint(equalTo: container.trailingAnchor)
+        NSLayoutConstraint.activate([
+            webView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            webView.topAnchor.constraint(equalTo: container.topAnchor),
+            webView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            lyricsPanel.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            lyricsPanel.topAnchor.constraint(equalTo: container.topAnchor),
+            lyricsPanel.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            lyricsPanel.widthAnchor.constraint(equalToConstant: 340),
+        ])
+        window.contentView = container
+        applyLyricsVisibility()
 
         let toolbar = NSToolbar(identifier: "player")
         toolbar.delegate = self
@@ -82,23 +102,37 @@ final class PlayerWindowController: NSWindowController, NSToolbarDelegate, WKNav
         webView.evaluateJavaScript("window.__cadenza && window.__cadenza.\(call)", completionHandler: nil)
     }
 
-    func setMode(_ newMode: PlaybackMode) {
-        guard newMode != .none else { return }
-        run("setMode('\(newMode.rawValue)')")
+    var lyricsVisible: Bool { UserDefaults.standard.bool(forKey: Prefs.showLyrics) }
+
+    @objc func toggleLyrics() {
+        UserDefaults.standard.set(!lyricsVisible, forKey: Prefs.showLyrics)
+        applyLyricsVisibility()
+    }
+
+    private func applyLyricsVisibility() {
+        let show = lyricsVisible
+        lyricsPanel.isHidden = !show
+        webTrailingToEdge.isActive = !show
+        webTrailingToPanel.isActive = show
+    }
+
+    func signIn() {
+        webView.load(URLRequest(url: URL(string:
+            "https://accounts.google.com/ServiceLogin?service=youtube&continue=https%3A%2F%2Fmusic.youtube.com%2F")!))
     }
 
     // MARK: Toolbar
 
     private static let navItem = NSToolbarItem.Identifier("nav")
     private static let reloadItem = NSToolbarItem.Identifier("reload")
-    private static let modeItem = NSToolbarItem.Identifier("mode")
+    private static let lyricsItem = NSToolbarItem.Identifier("lyrics")
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [Self.navItem, Self.reloadItem, .flexibleSpace, Self.modeItem]
+        [Self.navItem, Self.reloadItem, .flexibleSpace, Self.lyricsItem]
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [Self.navItem, Self.reloadItem, .flexibleSpace, Self.modeItem]
+        [Self.navItem, Self.reloadItem, .flexibleSpace, Self.lyricsItem]
     }
 
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier id: NSToolbarItem.Identifier,
@@ -121,18 +155,14 @@ final class PlayerWindowController: NSWindowController, NSToolbarDelegate, WKNav
             item.target = self
             item.action = #selector(reloadPage)
             return item
-        case Self.modeItem:
-            modeControl = NSSegmentedControl(
-                labels: ["Song", "Video"], trackingMode: .selectOne,
-                target: self, action: #selector(modeChanged(_:)))
-            modeControl.setImage(symbol("music.note", "Song"), forSegment: 0)
-            modeControl.setImage(symbol("play.rectangle", "Video"), forSegment: 1)
-            modeControl.segmentStyle = .automatic
+        case Self.lyricsItem:
             let item = NSToolbarItem(itemIdentifier: id)
-            item.view = modeControl
-            item.label = "Song/Video"
-            item.toolTip = "Switch between audio and music video"
-            refreshModeControl()
+            item.image = symbol("quote.bubble", "Lyrics")
+            item.label = "Lyrics"
+            item.toolTip = "Show or hide lyrics"
+            item.isBordered = true
+            item.target = self
+            item.action = #selector(toggleLyrics)
             return item
         default:
             return nil
@@ -143,36 +173,38 @@ final class PlayerWindowController: NSWindowController, NSToolbarDelegate, WKNav
         NSImage(systemSymbolName: name, accessibilityDescription: description) ?? NSImage()
     }
 
-    private func refreshModeControl() {
-        guard let control = modeControl else { return }
-        control.isEnabled = canSwitchMode
-        switch mode {
-        case .audio: control.selectedSegment = 0
-        case .video: control.selectedSegment = 1
-        case .none: control.selectedSegment = -1
-        }
-    }
-
     @objc private func navigate(_ sender: NSToolbarItemGroup) {
         if sender.selectedIndex == 0 { webView.goBack() } else { webView.goForward() }
     }
 
     @objc private func reloadPage() { webView.reload() }
 
-    @objc private func modeChanged(_ sender: NSSegmentedControl) {
-        setMode(sender.selectedSegment == 1 ? .video : .audio)
-    }
-
     // MARK: Bridge
 
-    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
-        guard message.frameInfo.isMainFrame, let state = message.body as? [String: Any] else { return }
-        mode = PlaybackMode(rawValue: state["mode"] as? String ?? "") ?? .none
-        canSwitchMode = (state["canSwitch"] as? Bool ?? false) && mode != .none
-        refreshModeControl()
+    /// YouTube audio format ids ("itags") for the streams the web player uses.
+    private static let audioFormats = [
+        "139": "AAC 48 kbps", "140": "AAC 128 kbps", "141": "AAC 256 kbps",
+        "249": "Opus 50 kbps", "250": "Opus 70 kbps", "251": "Opus 160 kbps", "774": "Opus 256 kbps",
+    ]
 
-        let quality = state["quality"] as? String ?? ""
-        window?.subtitle = mode == .video && !quality.isEmpty ? "Video · \(quality)" : ""
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard message.frameInfo.isMainFrame, let body = message.body as? [String: Any] else { return }
+        switch body["type"] as? String {
+        case "time":
+            if body["id"] as? String == lyrics.track.id, let t = body["t"] as? Double { lyrics.setTime(t) }
+        case "track":
+            if body["ad"] as? Bool == true { return } // keep the song's lyrics up during an ad
+            lyrics.setTrack(Track(
+                id: body["id"] as? String ?? "",
+                title: body["title"] as? String ?? "",
+                artist: body["artist"] as? String ?? "",
+                album: body["album"] as? String ?? "",
+                duration: body["duration"] as? Double ?? 0))
+            let afmt = body["afmt"] as? String ?? ""
+            window?.subtitle = afmt.isEmpty ? "" : (Self.audioFormats[afmt] ?? "Audio format \(afmt)")
+        default:
+            break
+        }
     }
 
     // MARK: Navigation

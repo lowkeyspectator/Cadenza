@@ -4,7 +4,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private var controller: PlayerWindowController!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        UserDefaults.standard.register(defaults: [Prefs.maxQuality: true])
+        UserDefaults.standard.register(defaults: [Prefs.audioOnly: true, Prefs.showLyrics: true])
         controller = PlayerWindowController()
         NSApp.mainMenu = buildMenu()
         controller.showWindow(nil)
@@ -27,6 +27,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
         let appMenu = NSMenu()
         appMenu.addItem(withTitle: "About \(name)", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(.separator())
+        item(appMenu, "Sign In to YouTube Music…", #selector(signIn), "")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Hide \(name)", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         let hideOthers = appMenu.addItem(withTitle: "Hide Others", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
@@ -54,6 +56,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         item(view, "Home", #selector(goHome), "H", [.command, .shift])
         item(view, "Reload", #selector(reload), "r")
         view.addItem(.separator())
+        item(view, "Show Lyrics", #selector(toggleLyrics), "l")
+        view.addItem(.separator())
         let fs = view.addItem(withTitle: "Enter Full Screen", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
         fs.keyEquivalentModifierMask = [.command, .control]
         add(view, titled: "View", to: main)
@@ -63,10 +67,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         item(playback, "Next", #selector(nextTrack), String(Character(UnicodeScalar(NSRightArrowFunctionKey)!)))
         item(playback, "Previous", #selector(previousTrack), String(Character(UnicodeScalar(NSLeftArrowFunctionKey)!)))
         playback.addItem(.separator())
-        item(playback, "Song (Audio)", #selector(switchToAudio), "1")
-        item(playback, "Video", #selector(switchToVideo), "2")
-        playback.addItem(.separator())
-        item(playback, "Always Use Highest Video Quality", #selector(toggleMaxQuality), "")
+        item(playback, "Audio Only (No Video)", #selector(toggleAudioOnly), "")
         add(playback, titled: "Playback", to: main)
 
         let window = NSMenu(title: "Window")
@@ -97,15 +98,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         switch menuItem.action {
-        case #selector(toggleMaxQuality):
-            menuItem.state = UserDefaults.standard.bool(forKey: Prefs.maxQuality) ? .on : .off
+        case #selector(toggleAudioOnly):
+            menuItem.state = UserDefaults.standard.bool(forKey: Prefs.audioOnly) ? .on : .off
             return true
-        case #selector(switchToAudio):
-            menuItem.state = controller.mode == .audio ? .on : .off
-            return controller.canSwitchMode
-        case #selector(switchToVideo):
-            menuItem.state = controller.mode == .video ? .on : .off
-            return controller.canSwitchMode
+        case #selector(toggleLyrics):
+            menuItem.state = controller.lyricsVisible ? .on : .off
+            return true
         default:
             return true
         }
@@ -120,17 +118,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     @objc private func playPause() { controller.run("playPause()") }
     @objc private func nextTrack() { controller.run("next()") }
     @objc private func previousTrack() { controller.run("previous()") }
-    @objc private func switchToAudio() { controller.setMode(.audio) }
-    @objc private func switchToVideo() { controller.setMode(.video) }
+    @objc private func toggleLyrics() { controller.toggleLyrics() }
+    @objc private func signIn() { controller.signIn() }
     @objc private func showPlayer() { controller.showWindow(nil) }
 
-    @objc private func toggleMaxQuality() {
-        let on = !UserDefaults.standard.bool(forKey: Prefs.maxQuality)
-        UserDefaults.standard.set(on, forKey: Prefs.maxQuality)
-        controller.run("setMaxQuality(\(on))")
+    @objc private func toggleAudioOnly() {
+        let on = !UserDefaults.standard.bool(forKey: Prefs.audioOnly)
+        UserDefaults.standard.set(on, forKey: Prefs.audioOnly)
+        controller.run("setAudioOnly(\(on))")
     }
 }
 
 enum Prefs {
-    static let maxQuality = "maxVideoQuality"
+    static let audioOnly = "audioOnly"
+    static let showLyrics = "showLyrics"
 }

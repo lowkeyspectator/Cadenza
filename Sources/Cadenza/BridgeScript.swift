@@ -1,9 +1,9 @@
 // JavaScript injected into music.youtube.com (page world).
 let bridgeScript = #"""
-// Injected into music.youtube.com. Bridges the web player to the native shell:
-//  - reports the Song/Video switch state and the current track
-//  - lets the native toolbar flip the Song/Video switch
-//  - keeps video playback pinned to the highest quality the stream offers
+// Bridges the web player to the native shell:
+//  - keeps playback on the audio ("Song") version and hides video
+//  - reports the current track, audio format and playback position
+//  - lets the native lyrics panel seek
 (function () {
   if (window.__cadenza) return;
 
@@ -18,82 +18,109 @@ let bridgeScript = #"""
     return !!el;
   };
 
+  const style = document.createElement('style');
+  style.textContent = `
+    html.cadenza-audio-only ytmusic-av-toggle { display: none !important; }
+    html.cadenza-audio-only #movie_player video { opacity: 0 !important; }
+    html.cadenza-audio-only #movie_player {
+      background: #000 var(--cadenza-art, none) center / contain no-repeat !important;
+    }`;
+  (document.head || document.documentElement).appendChild(style);
+
   const api = (window.__cadenza = {
-    maxQuality: true,
+    audioOnly: true,
 
-    // 'audio' | 'video' | 'none' (no track loaded, or the track has no switch)
-    mode() {
-      const t = avToggle();
-      if (!t) return 'none';
-      return (t.getAttribute('playback-mode') || '').startsWith('OMV') ? 'video' : 'audio';
-    },
-
-    // The switch is locked for tracks that exist only as a song or only as a video.
-    canSwitch() {
-      const t = avToggle();
-      return !!t && !t.hasAttribute('toggle-disabled');
-    },
-
-    setMode(mode) {
-      const t = avToggle();
-      if (!t) return false;
-      const btn = t.querySelector(mode === 'video' ? '.video-button' : '.song-button');
-      if (!btn) return false;
-      btn.click();
-      return true;
+    setAudioOnly(on) {
+      api.audioOnly = !!on;
+      lastSwitch = '';
+      if (!on) {
+        const p = player();
+        if (p && p.setPlaybackQualityRange) p.setPlaybackQualityRange('auto', 'auto');
+      }
+      enforceAudio();
     },
 
     playPause: () => click('#play-pause-button'),
     next: () => click('.next-button'),
     previous: () => click('.previous-button'),
 
-    setMaxQuality(on) {
-      api.maxQuality = !!on;
-      lastPinned = null;
-      if (!on) {
-        const p = player();
-        if (p && p.setPlaybackQualityRange) p.setPlaybackQualityRange('auto', 'auto');
-      }
+    seek(seconds) {
+      const p = player();
+      if (p && p.seekTo) p.seekTo(seconds, true);
     },
   });
 
-  // --- Highest video quality -------------------------------------------------
-  let lastPinned = null;
-  function pinQuality() {
-    if (!api.maxQuality) return;
-    const p = player();
-    if (!p || !p.getAvailableQualityLevels || !p.setPlaybackQualityRange) return;
-    const levels = p.getAvailableQualityLevels().filter((q) => q !== 'auto');
-    if (!levels.length) return; // audio-only stream or nothing loaded yet
-    const top = levels[0]; // the player lists levels best-first
-    const id = (p.getVideoData && p.getVideoData().video_id) || '';
-    const key = id + ':' + top;
-    if (lastPinned === key && p.getPlaybackQuality() === top) return;
-    p.setPlaybackQualityRange(top, top);
-    lastPinned = key;
-  }
+  const isAd = (p) => p.classList.contains('ad-showing') || p.classList.contains('ad-interrupting');
+  const videoId = (p) => (p.getVideoData && p.getVideoData().video_id) || '';
 
-  // --- State reporting -------------------------------------------------------
-  let lastState = '';
-  function report() {
-    const md = navigator.mediaSession && navigator.mediaSession.metadata;
+  // --- Audio only ------------------------------------------------------------
+  let lastSwitch = '';
+  function enforceAudio() {
+    document.documentElement.classList.toggle('cadenza-audio-only', api.audioOnly);
+    if (!api.audioOnly) return;
     const p = player();
-    const state = {
-      mode: api.mode(),
-      canSwitch: api.canSwitch(),
-      title: md ? md.title || '' : '',
-      artist: md ? md.artist || '' : '',
-      quality: p && p.getPlaybackQualityLabel ? p.getPlaybackQualityLabel() || '' : '',
-    };
-    const s = JSON.stringify(state);
-    if (s !== lastState) {
-      lastState = s;
-      post(state);
+    if (!p) return;
+    const id = videoId(p);
+
+    // Preferred: YouTube Music's own Song/Video switch (Premium, tracks that have both).
+    const t = avToggle();
+    const onVideo = t && (t.getAttribute('playback-mode') || '').startsWith('OMV');
+    if (onVideo && !t.hasAttribute('toggle-disabled') && lastSwitch !== id) {
+      const btn = t.querySelector('.song-button');
+      if (btn) { lastSwitch = id; btn.click(); return; }
+    }
+
+    // Otherwise the stream carries video: fetch a small picture and show cover art instead.
+    // Not the very smallest: at 144p ("tiny") the player also drops to a lower audio bitrate,
+    // while 240p and up keep the best audio stream.
+    if (p.getAvailableQualityLevels && p.setPlaybackQualityRange) {
+      const levels = p.getAvailableQualityLevels().filter((q) => q !== 'auto');
+      if (levels.length) {
+        const usable = levels.filter((q) => q !== 'tiny');
+        const low = usable.length ? usable[usable.length - 1] : levels[0];
+        if (p.getPlaybackQuality() !== low) p.setPlaybackQualityRange(low, low);
+        if (id) {
+          document.documentElement.style.setProperty(
+            '--cadenza-art', `url(https://i.ytimg.com/vi/${id}/hqdefault.jpg)`);
+        }
+      }
     }
   }
 
-  setInterval(() => {
-    try { pinQuality(); report(); } catch (e) {}
-  }, 1000);
+  // --- State reporting -------------------------------------------------------
+  let lastTrack = '';
+  function reportTrack() {
+    const p = player();
+    if (!p || !p.getVideoData) return;
+    const md = navigator.mediaSession && navigator.mediaSession.metadata;
+    const stats = p.getVideoStats ? p.getVideoStats() || {} : {};
+    const levels = p.getAvailableQualityLevels ? p.getAvailableQualityLevels() : [];
+    const track = {
+      type: 'track',
+      ad: isAd(p),
+      id: videoId(p),
+      title: md ? md.title || '' : '',
+      artist: md ? md.artist || '' : '',
+      album: md ? md.album || '' : '',
+      duration: p.getDuration ? p.getDuration() || 0 : 0,
+      afmt: String(stats.afmt || ''),
+      hasVideo: levels.some((q) => q !== 'auto'),
+    };
+    const s = JSON.stringify(track);
+    if (s !== lastTrack) { lastTrack = s; post(track); }
+  }
+
+  let lastTime = -1;
+  function reportTime() {
+    const p = player();
+    if (!p || !p.getCurrentTime || isAd(p)) return;
+    const t = p.getCurrentTime();
+    if (Math.abs(t - lastTime) < 0.05) return;
+    lastTime = t;
+    post({ type: 'time', id: videoId(p), t });
+  }
+
+  setInterval(() => { try { enforceAudio(); reportTrack(); } catch (e) {} }, 1000);
+  setInterval(() => { try { reportTime(); } catch (e) {} }, 250);
 })();
 """#
