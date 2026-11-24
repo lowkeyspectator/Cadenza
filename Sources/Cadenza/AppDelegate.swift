@@ -1,0 +1,136 @@
+import AppKit
+
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
+    private var controller: PlayerWindowController!
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        UserDefaults.standard.register(defaults: [Prefs.maxQuality: true])
+        controller = PlayerWindowController()
+        NSApp.mainMenu = buildMenu()
+        controller.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    // Keep playing with the window closed; clicking the Dock icon brings it back.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag { controller.showWindow(nil) }
+        return true
+    }
+
+    // MARK: Menu
+
+    private func buildMenu() -> NSMenu {
+        let main = NSMenu()
+        let name = "Cadenza"
+
+        let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "About \(name)", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "Hide \(name)", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        let hideOthers = appMenu.addItem(withTitle: "Hide Others", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
+        hideOthers.keyEquivalentModifierMask = [.command, .option]
+        appMenu.addItem(withTitle: "Show All", action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: "")
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "Quit \(name)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        add(appMenu, titled: name, to: main)
+
+        // Standard Edit menu so copy/paste and typing shortcuts work in the sign-in form and search.
+        let edit = NSMenu(title: "Edit")
+        edit.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+        let redo = edit.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "z")
+        redo.keyEquivalentModifierMask = [.command, .shift]
+        edit.addItem(.separator())
+        edit.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        edit.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        add(edit, titled: "Edit", to: main)
+
+        let view = NSMenu(title: "View")
+        item(view, "Back", #selector(goBack), "[")
+        item(view, "Forward", #selector(goForward), "]")
+        item(view, "Home", #selector(goHome), "H", [.command, .shift])
+        item(view, "Reload", #selector(reload), "r")
+        view.addItem(.separator())
+        let fs = view.addItem(withTitle: "Enter Full Screen", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
+        fs.keyEquivalentModifierMask = [.command, .control]
+        add(view, titled: "View", to: main)
+
+        let playback = NSMenu(title: "Playback")
+        item(playback, "Play/Pause", #selector(playPause), "p")
+        item(playback, "Next", #selector(nextTrack), String(Character(UnicodeScalar(NSRightArrowFunctionKey)!)))
+        item(playback, "Previous", #selector(previousTrack), String(Character(UnicodeScalar(NSLeftArrowFunctionKey)!)))
+        playback.addItem(.separator())
+        item(playback, "Song (Audio)", #selector(switchToAudio), "1")
+        item(playback, "Video", #selector(switchToVideo), "2")
+        playback.addItem(.separator())
+        item(playback, "Always Use Highest Video Quality", #selector(toggleMaxQuality), "")
+        add(playback, titled: "Playback", to: main)
+
+        let window = NSMenu(title: "Window")
+        window.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        window.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
+        window.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        item(window, "Show Player", #selector(showPlayer), "0")
+        add(window, titled: "Window", to: main)
+        NSApp.windowsMenu = window
+
+        return main
+    }
+
+    private func add(_ menu: NSMenu, titled title: String, to main: NSMenu) {
+        let holder = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        holder.submenu = menu
+        main.addItem(holder)
+    }
+
+    @discardableResult
+    private func item(_ menu: NSMenu, _ title: String, _ action: Selector, _ key: String,
+                      _ mods: NSEvent.ModifierFlags = [.command]) -> NSMenuItem {
+        let it = menu.addItem(withTitle: title, action: action, keyEquivalent: key)
+        it.keyEquivalentModifierMask = mods
+        it.target = self
+        return it
+    }
+
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        switch menuItem.action {
+        case #selector(toggleMaxQuality):
+            menuItem.state = UserDefaults.standard.bool(forKey: Prefs.maxQuality) ? .on : .off
+            return true
+        case #selector(switchToAudio):
+            menuItem.state = controller.mode == .audio ? .on : .off
+            return controller.canSwitchMode
+        case #selector(switchToVideo):
+            menuItem.state = controller.mode == .video ? .on : .off
+            return controller.canSwitchMode
+        default:
+            return true
+        }
+    }
+
+    // MARK: Actions
+
+    @objc private func goBack() { controller.webView.goBack() }
+    @objc private func goForward() { controller.webView.goForward() }
+    @objc private func goHome() { controller.loadHome() }
+    @objc private func reload() { controller.webView.reload() }
+    @objc private func playPause() { controller.run("playPause()") }
+    @objc private func nextTrack() { controller.run("next()") }
+    @objc private func previousTrack() { controller.run("previous()") }
+    @objc private func switchToAudio() { controller.setMode(.audio) }
+    @objc private func switchToVideo() { controller.setMode(.video) }
+    @objc private func showPlayer() { controller.showWindow(nil) }
+
+    @objc private func toggleMaxQuality() {
+        let on = !UserDefaults.standard.bool(forKey: Prefs.maxQuality)
+        UserDefaults.standard.set(on, forKey: Prefs.maxQuality)
+        controller.run("setMaxQuality(\(on))")
+    }
+}
+
+enum Prefs {
+    static let maxQuality = "maxVideoQuality"
+}
