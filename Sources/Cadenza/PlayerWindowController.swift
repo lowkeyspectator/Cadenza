@@ -97,6 +97,7 @@ final class PlayerWindowController: NSWindowController, WKNavigationDelegate, WK
         ])
         window.contentView = container
 
+        installKeyHandling()
         observers.append(model.$webMode.sink { [weak self] on in self?.applyWebMode(on) })
         webView.load(URLRequest(url: Self.home))
     }
@@ -104,8 +105,18 @@ final class PlayerWindowController: NSWindowController, WKNavigationDelegate, WK
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
     private func applyWebMode(_ on: Bool) {
-        nativeHost.isHidden = on
         webBarHost.isHidden = !on
+        if nativeHost.isHidden != on {
+            // Cross-fade between the native interface and the web player.
+            nativeHost.isHidden = false
+            let host = nativeHost!
+            NSAnimationContext.runAnimationGroup({ context in
+                context.duration = 0.2
+                host.animator().alphaValue = on ? 0 : 1
+            }, completionHandler: { [weak self] in
+                MainActor.assumeIsolated { host.isHidden = self?.model.webMode ?? false }
+            })
+        }
         if !on { signingIn = false }
         // Leaving a Google page behind would leave the engine without a player.
         if !on, let host = webView.url?.host, !host.hasSuffix("music.youtube.com") { reloadPlayer() }
@@ -114,11 +125,61 @@ final class PlayerWindowController: NSWindowController, WKNavigationDelegate, WK
     // MARK: Engine
 
     func fetch(_ call: String, _ arguments: [String: Any]) async throws -> Data {
-        let result = try await webView.callAsyncJavaScript(
-            "return JSON.stringify(await window.__cadenza.\(call))",
-            arguments: arguments, in: nil, contentWorld: .page)
-        guard let json = result as? String else { throw URLError(.cannotParseResponse) }
-        return Data(json.utf8)
+        var lastError: Error = URLError(.cannotConnectToHost)
+        // The player page may be mid-load (launch, after sign-in, after a fallback navigation),
+        // so wait for it and retry rather than surfacing a transient failure.
+        for attempt in 0..<3 {
+            if attempt > 0 { try await Task.sleep(nanoseconds: 700_000_000) }
+            guard await bridgeIsReady() else { lastError = URLError(.timedOut); continue }
+            do {
+                let result = try await webView.callAsyncJavaScript(
+                    "return JSON.stringify(await window.__cadenza.\(call))",
+                    arguments: arguments, in: nil, contentWorld: .page)
+                guard let json = result as? String else { throw URLError(.cannotParseResponse) }
+                return Data(json.utf8)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                lastError = error
+            }
+        }
+        throw lastError
+    }
+
+    private func bridgeIsReady() async -> Bool {
+        let probe = "!!(window.__cadenza && window.__cadenza.browse && window.ytcfg && window.ytcfg.get('INNERTUBE_CONTEXT'))"
+        for _ in 0..<40 { // up to ~10 s
+            if Task.isCancelled { return false }
+            if !model.webMode, !webView.isLoading, let host = webView.url?.host,
+               !host.hasSuffix("music.youtube.com") {
+                reloadPlayer() // stranded on a sign-in page with the web player hidden
+            }
+            if (try? await webView.evaluateJavaScript(probe)) as? Bool == true { return true }
+            try? await Task.sleep(nanoseconds: 250_000_000)
+        }
+        return false
+    }
+
+    /// Puts the cursor in the sidebar search field.
+    func focusSearch() {
+        if model.webMode { model.webMode = false }
+        func find(_ view: NSView) -> NSTextField? {
+            if let field = view as? NSTextField, field.isEditable { return field }
+            for sub in view.subviews { if let hit = find(sub) { return hit } }
+            return nil
+        }
+        if let field = find(nativeHost) { window?.makeFirstResponder(field) }
+    }
+
+    /// Space toggles playback, as in Music, unless the user is typing or using the web player.
+    private func installKeyHandling() {
+        observers.append(NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, event.window === self.window, !self.model.webMode,
+                  event.keyCode == 49, event.modifierFlags.intersection([.command, .option, .control]).isEmpty,
+                  !(self.window?.firstResponder is NSText) else { return event }
+            self.model.playPause()
+            return nil
+        } as Any)
     }
 
     /// Calls a function on the injected `window.__cadenza` bridge.

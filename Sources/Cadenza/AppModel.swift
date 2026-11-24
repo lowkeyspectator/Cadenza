@@ -27,8 +27,9 @@ struct PageSection: Decodable, Identifiable {
     var title: String
     var style: String // "carousel" | "list" | "grid"
     var items: [Item]
+    var continuation: String?
 
-    private enum CodingKeys: String, CodingKey { case title, style, items }
+    private enum CodingKeys: String, CodingKey { case title, style, items, continuation }
 }
 
 struct PageHeader: Decodable {
@@ -90,6 +91,13 @@ final class PlaybackClock: ObservableObject {
     var scrubbing = false
 }
 
+/// Volume, also kept apart so dragging the slider does not redraw the page.
+@MainActor
+final class VolumeState: ObservableObject {
+    @Published var level = 100.0
+    var lastSet = Date.distantPast
+}
+
 /// What the interface needs from the hidden web player.
 @MainActor
 protocol Engine: AnyObject {
@@ -105,6 +113,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var backStack: [Route] = []
     @Published private(set) var forwardStack: [Route] = []
     @Published private(set) var page: Page?
+    /// Changes whenever a different page is put on screen; drives the page cross-fade.
+    @Published private(set) var pageVersion = 0
     @Published private(set) var loading = false
     @Published private(set) var error: String?
 
@@ -113,21 +123,29 @@ final class AppModel: ObservableObject {
     @Published private(set) var loggedIn = false
     @Published private(set) var ready = false
     @Published private(set) var now = NowPlaying()
-    @Published var volume = 100.0
     @Published var showLyrics = UserDefaults.standard.bool(forKey: Prefs.showLyrics) {
         didSet { UserDefaults.standard.set(showLyrics, forKey: Prefs.showLyrics) }
     }
     @Published var webMode = false
 
     let clock = PlaybackClock()
+    let volume = VolumeState()
     let lyrics = LyricsModel()
     weak var engine: Engine?
 
     private var cache: [Route: Page] = [:]
     private var loadTask: Task<Void, Never>?
 
+    private var loadingMore: Set<String> = []
+
     init() {
         lyrics.onSeek = { [weak self] in self?.seek(to: $0) }
+        lyrics.reference = { [weak self] id in
+            struct Reply: Decodable { let text: String }
+            guard let data = try? await self?.engine?.fetch("lyrics(id)", ["id": id]),
+                  let reply = try? JSONDecoder().decode(Reply.self, from: data) else { return nil }
+            return reply.text.isEmpty ? nil : reply.text
+        }
     }
 
     // MARK: Navigation
@@ -167,10 +185,12 @@ final class AppModel: ObservableObject {
         loadTask?.cancel()
         if let cached = cache[new] {
             page = cached
+            pageVersion += 1
             loading = false
             return
         }
         page = nil
+        pageVersion += 1
         guard ready else { loading = true; return } // loads as soon as the player reports in
         loading = true
         loadTask = Task { [weak self] in
@@ -185,6 +205,7 @@ final class AppModel: ObservableObject {
                 if Task.isCancelled { return }
                 self.cache[new] = page
                 self.page = page
+                self.pageVersion += 1
             } catch {
                 if Task.isCancelled { return }
                 self.error = "Couldn’t load this page. \(error.localizedDescription)"
@@ -200,6 +221,31 @@ final class AppModel: ObservableObject {
                   let page = try? JSONDecoder().decode(Page.self, from: data) else { return }
             self?.playlists = page.sections.flatMap(\.items).filter { $0.kind == "playlist" && $0.browseId != nil }
         }
+    }
+
+    /// Fetches the next batch of a long list (playlists over ~100 tracks, big libraries).
+    func loadMore(_ section: PageSection) {
+        guard let token = section.continuation, !loadingMore.contains(token), let engine else { return }
+        loadingMore.insert(token)
+        let origin = route
+        Task { [weak self] in
+            struct Batch: Decodable { let items: [Item]; let continuation: String? }
+            let data = try? await engine.fetch("more(token)", ["token": token])
+            guard let self else { return }
+            self.loadingMore.remove(token)
+            guard let data, let batch = try? JSONDecoder().decode(Batch.self, from: data),
+                  var page = self.cache[origin],
+                  let index = page.sections.firstIndex(where: { $0.continuation == token }) else { return }
+            page.sections[index].items += batch.items
+            // An empty batch means the list is finished even if a token came back.
+            page.sections[index].continuation = batch.items.isEmpty ? nil : batch.continuation
+            self.cache[origin] = page
+            if self.route == origin { self.page = page }
+        }
+    }
+
+    func toggleLyrics() {
+        withAnimation(.spring(response: 0.32, dampingFraction: 0.9)) { showLyrics.toggle() }
     }
 
     // MARK: Items
@@ -243,7 +289,8 @@ final class AppModel: ObservableObject {
     }
 
     func setVolume(_ value: Double) {
-        volume = value
+        volume.level = value
+        volume.lastSet = Date()
         engine?.run("setVolume(\(Int(value)))")
     }
 
@@ -284,7 +331,9 @@ final class AppModel: ObservableObject {
         updated.format = afmt.isEmpty ? "" : (Self.audioFormats[afmt] ?? "Format \(afmt)")
         if updated != now { now = updated }
 
-        if !clock.scrubbing, let v = body["volume"] as? Double, abs(v - volume) > 0.5 { volume = v }
+        // Ignore the player's echo while the slider is being dragged.
+        if let v = body["volume"] as? Double, abs(v - volume.level) > 0.5,
+           Date().timeIntervalSince(volume.lastSet) > 1.5 { volume.level = v }
 
         lyrics.setTrack(Track(
             id: updated.id, title: updated.title, artist: updated.artist,

@@ -22,13 +22,14 @@ struct RootView: View {
                 TopBar(model: model)
                 ContentView(model: model)
                 Divider()
-                PlayerBar(model: model, clock: model.clock)
+                PlayerBar(model: model)
             }
             .background(Color(nsColor: .windowBackgroundColor))
             if model.showLyrics {
                 Divider()
                 LyricsView(model: model.lyrics)
                     .frame(width: 330)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
         .tint(Theme.accent)
@@ -147,18 +148,21 @@ struct SidebarView: View {
 
     private func row(_ title: String, _ symbol: String, _ route: Route) -> some View {
         let selected = model.route == route
-        return Button { model.open(route) } label: {
-            HStack(spacing: 8) {
-                Image(systemName: symbol)
-                    .font(.system(size: 14)).foregroundStyle(Theme.accent).frame(width: 20)
-                Text(title).font(.system(size: 13)).lineLimit(1)
-                Spacer(minLength: 0)
+        return Hover { hovering in
+            Button { model.open(route) } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: symbol)
+                        .font(.system(size: 14)).foregroundStyle(Theme.accent).frame(width: 20)
+                    Text(title).font(.system(size: 13)).lineLimit(1)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 8).padding(.vertical, 6)
+                .background(RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color.primary.opacity(selected ? 0.1 : (hovering ? 0.05 : 0))))
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, 8).padding(.vertical, 6)
-            .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(selected ? 0.1 : 0)))
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
         }
-        .buttonStyle(.plain)
     }
 }
 
@@ -174,7 +178,6 @@ struct TopBar: View {
             Button { model.goForward() } label: { Image(systemName: "chevron.right") }
                 .disabled(model.forwardStack.isEmpty)
             Spacer()
-            if model.loading { ProgressView().controlSize(.small) }
         }
         .buttonStyle(.borderless)
         .font(.system(size: 15, weight: .medium))
@@ -200,12 +203,17 @@ struct ContentView: View {
                     }
                 } else {
                     PageView(model: model, page: page)
+                        .id(model.route) // new scroll position per page
+                        .transition(.opacity)
                 }
+            } else if model.loading {
+                ProgressView().controlSize(.small).transition(.opacity)
             } else {
                 Color.clear
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .animation(.easeOut(duration: 0.18), value: model.pageVersion)
     }
 
     private func message(_ symbol: String, _ text: String, button: (String, () -> Void)?) -> some View {
@@ -241,7 +249,6 @@ struct PageView: View {
             }
             .padding(.top, 4).padding(.bottom, 28)
         }
-        .id(model.route) // start each page scrolled to the top
     }
 
     private var firstTrack: Item? {
@@ -315,12 +322,18 @@ struct SectionView: View {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 160, maximum: 200), spacing: 18, alignment: .top)],
                           alignment: .leading, spacing: 22) {
                     ForEach(section.items) { CardView(model: model, item: $0) }
+                    if section.continuation != nil {
+                        ProgressView().controlSize(.small).onAppear { model.loadMore(section) }
+                    }
                 }
                 .padding(.horizontal, 28)
             default:
                 LazyVStack(spacing: 0) {
                     ForEach(Array(section.items.enumerated()), id: \.element.id) { index, item in
                         TrackRow(model: model, item: item, header: header, number: index + 1)
+                    }
+                    if section.continuation != nil {
+                        ProgressView().controlSize(.small).padding(12).onAppear { model.loadMore(section) }
                     }
                 }
                 .padding(.horizontal, 20)
@@ -333,21 +346,41 @@ struct CardView: View {
     @ObservedObject var model: AppModel
     let item: Item
 
+    /// Albums and playlists can start playing straight from the card.
+    private var canPlay: Bool { item.videoId != nil || (item.playlistId != nil && !item.isRound) }
+
     var body: some View {
-        Button { model.activate(item) } label: {
-            VStack(alignment: item.isRound ? .center : .leading, spacing: 6) {
-                Artwork(url: item.artURL, size: 160, round: item.isRound)
-                Text(item.title).font(.system(size: 13)).lineLimit(2)
-                    .multilineTextAlignment(item.isRound ? .center : .leading)
-                if let subtitle = item.subtitle, !subtitle.isEmpty {
-                    Text(subtitle).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(2)
+        Hover { hovering in
+            Button { model.activate(item) } label: {
+                VStack(alignment: item.isRound ? .center : .leading, spacing: 6) {
+                    Artwork(url: item.artURL, size: 160, round: item.isRound)
+                        .overlay(alignment: .bottomLeading) {
+                            if canPlay && hovering {
+                                Button { model.play(item) } label: {
+                                    Image(systemName: "play.fill")
+                                        .font(.system(size: 13)).foregroundStyle(.white)
+                                        .frame(width: 30, height: 30)
+                                        .background(.ultraThinMaterial, in: Circle())
+                                }
+                                .buttonStyle(.plain).padding(8)
+                                .transition(.opacity.combined(with: .scale(scale: 0.85)))
+                            }
+                        }
+                        .brightness(hovering ? -0.06 : 0)
+                    Text(item.title).font(.system(size: 13)).lineLimit(2)
                         .multilineTextAlignment(item.isRound ? .center : .leading)
+                    if let subtitle = item.subtitle, !subtitle.isEmpty {
+                        Text(subtitle).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(2)
+                            .multilineTextAlignment(item.isRound ? .center : .leading)
+                    }
                 }
+                .frame(width: 160, alignment: item.isRound ? .center : .leading)
+                .contentShape(Rectangle())
             }
-            .frame(width: 160, alignment: item.isRound ? .center : .leading)
-            .contentShape(Rectangle())
+            .buttonStyle(PressableStyle())
+            .animation(.easeOut(duration: 0.15), value: hovering)
+            .contextMenu { ItemMenu(model: model, item: item) }
         }
-        .buttonStyle(PressableStyle())
     }
 }
 
@@ -359,74 +392,92 @@ struct TrackRow: View {
 
     var body: some View {
         let current = item.videoId != nil && item.videoId == model.now.id
-        HStack(spacing: 12) {
-            ZStack {
-                if item.artURL != nil {
-                    // Rows with their own artwork (search results, playlists, mixes).
-                    Artwork(url: item.artURL, size: 40, round: item.isRound, corner: 5)
-                    if current {
-                        RoundedRectangle(cornerRadius: 5).fill(.black.opacity(0.45))
-                        Image(systemName: model.now.playing ? "speaker.wave.2.fill" : "speaker.fill")
-                            .font(.system(size: 13)).foregroundStyle(.white)
+        Hover { hovering in
+            Button { model.activate(item, in: header) } label: {
+                HStack(spacing: 12) {
+                    leading(current: current, hovering: hovering)
+                        .frame(width: 40, height: item.artURL != nil ? 40 : 28)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.title).font(.system(size: 13))
+                            .foregroundStyle(current ? Theme.accent : Color.primary).lineLimit(1)
+                        if let subtitle = item.subtitle, !subtitle.isEmpty {
+                            Text(subtitle).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+                        }
                     }
-                } else if current {
-                    Image(systemName: model.now.playing ? "speaker.wave.2.fill" : "speaker.fill")
-                        .font(.system(size: 12)).foregroundStyle(Theme.accent)
-                } else {
-                    // Album tracks share the album cover, so show the track number instead.
-                    Text("\(number)").font(.system(size: 13).monospacedDigit()).foregroundStyle(.secondary)
+                    Spacer(minLength: 12)
+                    if let duration = item.duration {
+                        Text(duration).font(.system(size: 12).monospacedDigit()).foregroundStyle(.secondary)
+                    } else if item.videoId == nil && item.browseId != nil {
+                        Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(.tertiary)
+                    }
                 }
+                .padding(.horizontal, 8).padding(.vertical, 6)
+                .background(RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color.primary.opacity(hovering ? 0.09 : (number % 2 == 1 ? 0.035 : 0))))
+                .contentShape(Rectangle())
             }
-            .frame(width: 40, height: item.artURL != nil ? 40 : 28)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(item.title).font(.system(size: 13))
-                    .foregroundStyle(current ? Theme.accent : Color.primary).lineLimit(1)
-                if let subtitle = item.subtitle, !subtitle.isEmpty {
-                    Text(subtitle).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
-                }
-            }
-            Spacer(minLength: 12)
-            if let duration = item.duration {
-                Text(duration).font(.system(size: 12).monospacedDigit()).foregroundStyle(.secondary)
-            } else if item.videoId == nil && item.browseId != nil {
-                Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(.tertiary)
-            }
+            .buttonStyle(PressableStyle(scale: 1))
+            .contextMenu { ItemMenu(model: model, item: item) }
         }
-        .padding(.horizontal, 8).padding(.vertical, 6)
-        .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(number % 2 == 1 ? 0.035 : 0)))
-        .contentShape(Rectangle())
-        .onTapGesture { model.activate(item, in: header) }
+    }
+
+    @ViewBuilder private func leading(current: Bool, hovering: Bool) -> some View {
+        let playable = item.videoId != nil
+        let symbol = current ? (model.now.playing ? "speaker.wave.2.fill" : "speaker.fill") : "play.fill"
+        if item.artURL != nil {
+            // Rows with their own artwork (search results, playlists, mixes).
+            ZStack {
+                Artwork(url: item.artURL, size: 40, round: item.isRound, corner: 5)
+                if current || (hovering && playable) {
+                    RoundedRectangle(cornerRadius: 5, style: .continuous).fill(.black.opacity(0.45))
+                    Image(systemName: symbol).font(.system(size: 13)).foregroundStyle(.white)
+                }
+            }
+        } else if current || (hovering && playable) {
+            Image(systemName: symbol).font(.system(size: 12)).foregroundStyle(Theme.accent)
+        } else {
+            // Album tracks share the album cover, so show the track number instead.
+            Text("\(number)").font(.system(size: 13).monospacedDigit()).foregroundStyle(.secondary)
+        }
     }
 }
 
-struct Artwork: View {
-    let url: URL?
-    let size: CGFloat
-    var round = false
-    var corner: CGFloat = 8
+struct ItemMenu: View {
+    @ObservedObject var model: AppModel
+    let item: Item
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: round ? size / 2 : corner)
-        AsyncImage(url: url) { phase in
-            if let image = phase.image {
-                image.resizable().aspectRatio(contentMode: .fill)
-            } else {
-                ZStack {
-                    Color.primary.opacity(0.08)
-                    Image(systemName: round ? "music.mic" : "music.note")
-                        .font(.system(size: size * 0.3)).foregroundStyle(.tertiary)
-                }
+        if item.videoId != nil || item.playlistId != nil {
+            Button("Play") { model.play(item) }
+        }
+        if let id = item.browseId {
+            Button("Open") { model.open(.browse(id: id, title: item.title)) }
+        }
+        if let link {
+            Divider()
+            Button("Copy Link") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(link, forType: .string)
             }
         }
-        .frame(width: size, height: size)
-        .clipShape(shape)
-        .overlay(shape.strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5))
+    }
+
+    private var link: String? {
+        if let v = item.videoId { return "https://music.youtube.com/watch?v=\(v)" }
+        if let b = item.browseId { return "https://music.youtube.com/browse/\(b)" }
+        if let p = item.playlistId { return "https://music.youtube.com/playlist?list=\(p)" }
+        return nil
     }
 }
 
 private struct PressableStyle: ButtonStyle {
+    var scale = 0.97
+
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label.opacity(configuration.isPressed ? 0.6 : 1)
+        configuration.label
+            .opacity(configuration.isPressed ? 0.75 : 1)
+            .scaleEffect(configuration.isPressed ? scale : 1)
+            .animation(.spring(response: 0.25, dampingFraction: 0.7), value: configuration.isPressed)
     }
 }
 
@@ -434,7 +485,6 @@ private struct PressableStyle: ButtonStyle {
 
 struct PlayerBar: View {
     @ObservedObject var model: AppModel
-    @ObservedObject var clock: PlaybackClock
 
     var body: some View {
         let now = model.now
@@ -445,12 +495,14 @@ struct PlayerBar: View {
                 Button { model.playPause() } label: {
                     Image(systemName: now.playing ? "pause.fill" : "play.fill")
                         .font(.system(size: 22)).frame(width: 26)
+                        .contentTransition(.symbolEffect(.replace))
                 }
                 Button { model.next() } label: { Image(systemName: "forward.fill") }
             }
             .font(.system(size: 15))
-            .buttonStyle(.borderless)
+            .buttonStyle(PressableStyle(scale: 0.88))
             .foregroundStyle(.primary)
+            .opacity(now.isEmpty ? 0.35 : 1)
             .disabled(now.isEmpty)
 
             // Now playing
@@ -462,24 +514,13 @@ struct PlayerBar: View {
                         Text(subtitle(now)).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
                         Spacer(minLength: 0)
                     }
-                    HStack(spacing: 8) {
-                        Text(Self.stamp(clock.time)).frame(width: 34, alignment: .trailing)
-                        Slider(value: Binding(
-                            get: { min(clock.time, max(now.duration, 1)) },
-                            set: { clock.time = $0 }),
-                               in: 0...max(now.duration, 1)) { editing in
-                            clock.scrubbing = editing
-                            if !editing { model.seek(to: clock.time) }
-                        }
-                        .controlSize(.mini)
-                        .disabled(now.isEmpty || now.ad)
-                        Text(Self.stamp(now.duration)).frame(width: 34, alignment: .leading)
-                    }
-                    .font(.system(size: 10).monospacedDigit()).foregroundStyle(.secondary)
+                    .animation(.easeInOut(duration: 0.2), value: now.id)
+                    Scrubber(model: model, clock: model.clock, duration: now.duration,
+                             enabled: !(now.isEmpty || now.ad))
                 }
             }
             .padding(.horizontal, 10).padding(.vertical, 6)
-            .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.05)))
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(0.05)))
             .frame(maxWidth: 560)
             .frame(maxWidth: .infinity)
 
@@ -492,14 +533,12 @@ struct PlayerBar: View {
                         .help("Audio stream currently playing")
                         .fixedSize()
                 }
-                Image(systemName: "speaker.wave.2.fill").font(.system(size: 11)).foregroundStyle(.secondary)
-                Slider(value: Binding(get: { model.volume }, set: { model.setVolume($0) }), in: 0...100)
-                    .controlSize(.mini).frame(width: 84)
-                Button { model.showLyrics.toggle() } label: {
+                VolumeSlider(model: model, volume: model.volume)
+                Button { model.toggleLyrics() } label: {
                     Image(systemName: model.showLyrics ? "quote.bubble.fill" : "quote.bubble")
                         .foregroundStyle(model.showLyrics ? Theme.accent : Color.primary)
                 }
-                .buttonStyle(.borderless).font(.system(size: 15))
+                .buttonStyle(PressableStyle(scale: 0.88)).font(.system(size: 15))
                 .help("Lyrics")
             }
         }
@@ -516,8 +555,51 @@ struct PlayerBar: View {
         now.ad || now.isEmpty ? "" : now.artist
     }
 
+}
+
+/// Redraws on every clock tick, so it is its own small view.
+private struct Scrubber: View {
+    let model: AppModel
+    @ObservedObject var clock: PlaybackClock
+    let duration: Double
+    let enabled: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(Self.stamp(clock.time)).frame(width: 34, alignment: .trailing)
+            Slider(value: Binding(
+                get: { min(clock.time, max(duration, 1)) },
+                set: { if clock.scrubbing { clock.time = $0 } }),
+                   in: 0...max(duration, 1)) { editing in
+                // Seek only at the end of a real drag, never from a programmatic change.
+                let wasScrubbing = clock.scrubbing
+                clock.scrubbing = editing
+                if wasScrubbing && !editing { model.seek(to: clock.time) }
+            }
+            .controlSize(.mini)
+            .disabled(!enabled)
+            Text(Self.stamp(duration)).frame(width: 34, alignment: .leading)
+        }
+        .font(.system(size: 10).monospacedDigit()).foregroundStyle(.secondary)
+    }
+
     private static func stamp(_ t: Double) -> String {
         guard t.isFinite, t >= 0 else { return "0:00" }
         return String(format: "%d:%02d", Int(t) / 60, Int(t) % 60)
+    }
+}
+
+private struct VolumeSlider: View {
+    let model: AppModel
+    @ObservedObject var volume: VolumeState
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: volume.level < 1 ? "speaker.slash.fill" : "speaker.wave.2.fill",
+                  variableValue: volume.level / 100)
+                .font(.system(size: 11)).foregroundStyle(.secondary).frame(width: 16)
+            Slider(value: Binding(get: { volume.level }, set: { model.setVolume($0) }), in: 0...100)
+                .controlSize(.mini).frame(width: 84)
+        }
     }
 }

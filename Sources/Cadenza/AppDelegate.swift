@@ -49,6 +49,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         edit.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
         edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
         edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        edit.addItem(.separator())
+        item(edit, "Search", #selector(search), "f")
         add(edit, titled: "Edit", to: main)
 
         let view = NSMenu(title: "View")
@@ -123,7 +125,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     @objc private func playPause() { controller.model.playPause() }
     @objc private func nextTrack() { controller.model.next() }
     @objc private func previousTrack() { controller.model.previous() }
-    @objc private func toggleLyrics() { controller.model.showLyrics.toggle() }
+    @objc private func toggleLyrics() { controller.model.toggleLyrics() }
+    @objc private func search() { controller.focusSearch() }
     @objc private func toggleWebPlayer() { controller.model.webMode.toggle() }
     @objc private func signIn() { controller.model.signIn() }
     @objc private func showPlayer() { controller.showWindow(nil) }

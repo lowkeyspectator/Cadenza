@@ -20,14 +20,16 @@ and it does not block ads.
   stream (no Premium, or a video-only upload), the picture is hidden behind the cover art and fetched at
   240p to save bandwidth. 240p is deliberate: at 144p the player also lowers the audio bitrate.
 - **Synced lyrics panel** (`⌘L` or the button in the player bar). The current line is highlighted and kept centred;
-  click any line to jump to that point in the song. Lyrics come from [LRCLIB](https://lrclib.net), a free
-  community database; the app sends it only the track title, artist, album and length. Songs without
-  time-synced lyrics show plain text, which cannot be used to seek.
+  click any line to jump to that point in the song. Timed lyrics come from [LRCLIB](https://lrclib.net), a
+  free community database; the app sends it only the track title, artist, album and length. Because that
+  match is by name only, each candidate is compared with YouTube Music's own lyrics for the track, and a
+  translation, romanisation or different song with the same title is rejected. When no timed version
+  matches, YouTube Music's plain lyrics are shown instead; those cannot be used to seek.
 - Stays signed in between launches. **Sign In** in the sidebar opens Google's sign-in page.
 - **Web player** (globe button, or `⇧⌘W`): shows the real YouTube Music page for anything the native
   interface does not cover, such as account and playback settings.
 - Media keys and the macOS Now Playing widget work (via the web player's media session).
-- Playback menu: Play/Pause `⌘P`, Next `⌘→`, Previous `⌘←`.
+- Keyboard: `Space` or `⌘P` play/pause, `⌘→` next, `⌘←` previous, `⌘F` search, `⌘[` / `⌘]` back and forward.
 - Keeps playing when the window is closed; click the Dock icon to bring it back.
 
 ### Audio quality
@@ -51,7 +53,7 @@ your other sign-in methods instead. If a passkey prompt still appears, choose **
 
 ## Build
 
-Requires macOS 13+ and the Swift toolchain (Xcode or just the Command Line Tools).
+Requires macOS 14+ and the Swift toolchain (Xcode or just the Command Line Tools).
 
 ```bash
 ./Scripts/build-app.sh
@@ -65,8 +67,8 @@ The app is ad-hoc signed for local use. Copy `build/Cadenza.app` to `/Applicatio
 
 ## Limits
 
-- Pages show the first batch of results YouTube Music returns; very long playlists and feeds are not
-  paged in yet.
+- Long playlists and library lists load more as you scroll; the Home and Explore feeds show only their
+  first batch of shelves.
 - No queue view, like button, or playlist editing yet. Use the web player for those.
 - On a free account, ads play in the hidden web player. The player bar shows "Advertisement" until the
   ad ends.

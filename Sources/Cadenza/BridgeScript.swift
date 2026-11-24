@@ -61,7 +61,7 @@ let bridgeScript = #"""
     return `SAPISIDHASH ${ts}_${hex}`;
   }
 
-  async function yt(endpoint, body) {
+  async function yt(endpoint, body, query) {
     const cfg = window.ytcfg;
     const headers = {
       'Content-Type': 'application/json',
@@ -72,7 +72,7 @@ let bridgeScript = #"""
     if (cfg.get('DELEGATED_SESSION_ID')) headers['X-Goog-PageId'] = cfg.get('DELEGATED_SESSION_ID');
     const auth = await authHeader();
     if (auth) headers.Authorization = auth;
-    const r = await fetch(`/youtubei/v1/${endpoint}?prettyPrint=false`, {
+    const r = await fetch(`/youtubei/v1/${endpoint}?prettyPrint=false${query || ''}`, {
       method: 'POST', credentials: 'include', headers,
       body: JSON.stringify({ context: cfg.get('INNERTUBE_CONTEXT'), ...body }),
     });
@@ -174,7 +174,25 @@ let bridgeScript = #"""
       });
       title = 'Top Result';
     }
-    return { title, style, items };
+    return { title, style, items, continuation: nextToken(v) };
+  }
+
+  // Long lists arrive in batches; each batch carries a token for the next one.
+  function nextToken(v) {
+    const old = v.continuations && find(v.continuations, 'continuation');
+    if (old) return old;
+    const raw = v.contents || v.items || [];
+    const last = raw.length ? raw[raw.length - 1].continuationItemRenderer : null;
+    return (last && find(last, 'token')) || null;
+  }
+
+  function collect(o, out, depth) {
+    depth = depth || 0;
+    if (!o || typeof o !== 'object' || depth > 12) return;
+    if (Array.isArray(o)) { o.forEach((x) => collect(x, out, depth + 1)); return; }
+    const e = entry(o);
+    if (e) { if (e.title) out.push(e); return; }
+    for (const v of Object.values(o)) collect(v, out, depth + 1);
   }
 
   function header(v) {
@@ -222,6 +240,27 @@ let bridgeScript = #"""
 
   api.browse = async (browseId, params) => normalize(await yt('browse', params ? { browseId, params } : { browseId }));
   api.search = async (query) => normalize(await yt('search', { query }));
+  api.more = async (token) => {
+    const t = encodeURIComponent(token);
+    const r = await yt('browse', { continuation: token }, `&ctoken=${t}&continuation=${t}`);
+    const items = [];
+    collect(r, items);
+    const next = find(r, 'nextContinuationData');
+    const tail = find(r, 'continuationItemRenderer');
+    return { items, continuation: (next && next.continuation) || (tail && find(tail, 'token')) || null };
+  };
+
+  // YouTube Music's own lyrics for a track (plain text, in the song's own language).
+  api.lyrics = async (videoId) => {
+    const next = await yt('next', { videoId });
+    const tabs = find(next, 'tabs') || [];
+    const tab = tabs.find((t) => find(t, 'pageType') === 'MUSIC_PAGE_TYPE_TRACK_LYRICS');
+    const browseId = tab && find(tab, 'browseId');
+    if (!browseId) return { text: '' };
+    const shelf = find(await yt('browse', { browseId }), 'musicDescriptionShelfRenderer');
+    return { text: shelf ? text(shelf.description) : '' };
+  };
+
   api.loggedIn = () => !!(window.ytcfg && window.ytcfg.get('LOGGED_IN'));
 
   // --- Playback --------------------------------------------------------------

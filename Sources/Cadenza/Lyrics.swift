@@ -32,7 +32,13 @@ enum LyricsService {
         let syncedLyrics: String?
     }
 
-    static func fetch(_ track: Track) async -> Result {
+    /// - Parameter reference: YouTube Music's own (untimed) lyrics for the track, when it has any.
+    ///   LRCLIB is matched only by title, artist and length, so the same title can come back as a
+    ///   translation, a romanisation or a different song. The reference decides which candidate is
+    ///   really this recording; if none is, the reference itself is shown rather than wrong lyrics.
+    static func fetch(_ track: Track, reference: String?) async -> Result {
+        var candidates: [Entry] = []
+
         var exact = URLComponents(string: "https://lrclib.net/api/get")!
         exact.queryItems = [
             URLQueryItem(name: "track_name", value: track.title),
@@ -40,23 +46,63 @@ enum LyricsService {
             URLQueryItem(name: "duration", value: String(Int(track.duration.rounded()))),
         ]
         if !track.album.isEmpty { exact.queryItems?.append(URLQueryItem(name: "album_name", value: track.album)) }
-        if let entry: Entry = await get(exact.url!), let result = result(from: entry) { return result }
+        if let entry: Entry = await get(exact.url!) { candidates.append(entry) }
 
-        // Looser search: drop "(Remastered)", "[Official Video]", featured artists and the like.
-        var search = URLComponents(string: "https://lrclib.net/api/search")!
-        search.queryItems = [
-            URLQueryItem(name: "track_name", value: simplified(track.title)),
-            URLQueryItem(name: "artist_name", value: primaryArtist(track.artist)),
-        ]
-        guard let entries: [Entry] = await get(search.url!) else { return .notFound }
-        let close = entries
-            .filter { abs(($0.duration ?? 0) - track.duration) <= 4 }
-            .sorted { abs(($0.duration ?? 0) - track.duration) < abs(($1.duration ?? 0) - track.duration) }
-        if let best = close.first(where: { !($0.syncedLyrics ?? "").isEmpty }) ?? close.first,
-           let result = result(from: best) {
-            return result
+        let reference = (reference ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let trusted = candidates.first.map { reference.isEmpty || similarity(text(of: $0), reference) >= 0.6 } ?? false
+        if !trusted {
+            // Looser search: drop "(Remastered)", "[Official Video]", featured artists and the like.
+            var search = URLComponents(string: "https://lrclib.net/api/search")!
+            search.queryItems = [
+                URLQueryItem(name: "track_name", value: simplified(track.title)),
+                URLQueryItem(name: "artist_name", value: primaryArtist(track.artist)),
+            ]
+            if let entries: [Entry] = await get(search.url!) {
+                candidates += entries
+                    .filter { abs(($0.duration ?? 0) - track.duration) <= 4 }
+                    .sorted { abs(($0.duration ?? 0) - track.duration) < abs(($1.duration ?? 0) - track.duration) }
+            }
         }
-        return .notFound
+
+        if reference.isEmpty {
+            let best = candidates.first { !($0.syncedLyrics ?? "").isEmpty } ?? candidates.first
+            return best.flatMap(result(from:)) ?? .notFound
+        }
+
+        // Keep only candidates that are the same words as YouTube Music's lyrics; prefer timed ones.
+        let matching = candidates
+            .map { ($0, similarity(text(of: $0), reference)) }
+            .filter { $0.1 >= 0.6 }
+            .sorted { $0.1 > $1.1 }
+        if let timed = matching.first(where: { !($0.0.syncedLyrics ?? "").isEmpty }),
+           case .synced(let lines)? = result(from: timed.0) {
+            return .synced(lines)
+        }
+        return .plain(reference)
+    }
+
+    private static func text(of entry: Entry) -> String {
+        if let plain = entry.plainLyrics, !plain.isEmpty { return plain }
+        return parseLRC(entry.syncedLyrics ?? "").map(\.text).joined(separator: "\n")
+    }
+
+    /// Overlap between two lyric texts, 0…1. Compares words, or character pairs for scripts
+    /// written without spaces (Chinese, Japanese, Thai…).
+    static func similarity(_ a: String, _ b: String) -> Double {
+        func units(_ s: String) -> Set<String> {
+            let words = s.lowercased().components(separatedBy: CharacterSet.letters.inverted).filter { !$0.isEmpty }
+            let letters = words.joined()
+            guard !letters.isEmpty else { return [] }
+            if Double(words.count) > Double(letters.count) / 12 {
+                return Set(words) // spaced script
+            }
+            let chars = Array(letters.prefix(6000))
+            return Set(zip(chars, chars.dropFirst()).map { String([$0, $1]) })
+        }
+        let x = units(a), y = units(b)
+        guard !x.isEmpty, !y.isEmpty else { return 0 }
+        // Share of the smaller text found in the larger one: tolerant of a missing verse or ad-libs.
+        return Double(x.intersection(y).count) / Double(min(x.count, y.count))
     }
 
     private static func result(from entry: Entry) -> Result? {
@@ -123,6 +169,8 @@ final class LyricsModel: ObservableObject {
     @Published private(set) var currentIndex: Int?
 
     var onSeek: ((Double) -> Void)?
+    /// Returns YouTube Music's own lyrics for a video id, or nil when it has none.
+    var reference: ((String) async -> String?)?
     private var task: Task<Void, Never>?
 
     func setTrack(_ new: Track) {
@@ -141,7 +189,9 @@ final class LyricsModel: ObservableObject {
         task = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 500_000_000) // let title/artist settle
             if Task.isCancelled { return }
-            let result = await LyricsService.fetch(new)
+            let reference = await self?.reference?(new.id)
+            if Task.isCancelled { return }
+            let result = await LyricsService.fetch(new, reference: reference)
             if Task.isCancelled { return }
             self?.apply(result)
         }
@@ -192,7 +242,7 @@ struct LyricsView: View {
             Divider()
             content
             Divider()
-            Text("Lyrics from LRCLIB").font(.caption2).foregroundStyle(.tertiary)
+            Text("Lyrics from LRCLIB and YouTube Music").font(.caption2).foregroundStyle(.tertiary)
                 .padding(.horizontal, 20).padding(.vertical, 8)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -208,7 +258,7 @@ struct LyricsView: View {
         case .plain(let text):
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("These lyrics aren’t time-synced, so lines can’t be used to seek.")
+                    Text("No time-synced lyrics for this version, so lines can’t be used to seek.")
                         .font(.caption).foregroundStyle(.secondary)
                     Text(text).font(.system(size: 16)).lineSpacing(6).textSelection(.enabled)
                 }
