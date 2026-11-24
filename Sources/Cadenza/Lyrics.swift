@@ -186,7 +186,7 @@ struct LyricsView: View {
                     Text(model.track.artist).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
-            .padding(.horizontal, 20).padding(.vertical, 14)
+            .padding(.horizontal, 20).padding(.top, 34).padding(.bottom, 14)
             .frame(maxWidth: .infinity, alignment: .leading)
 
             Divider()
@@ -196,8 +196,7 @@ struct LyricsView: View {
                 .padding(.horizontal, 20).padding(.vertical, 8)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(white: 0.06))
-        .preferredColorScheme(.dark)
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     @ViewBuilder private var content: some View {
@@ -255,11 +254,11 @@ private struct LineRow: View {
         Button(action: action) {
             Text(line.text)
                 .font(.system(size: 19, weight: isCurrent ? .bold : .semibold))
-                .foregroundStyle(.white.opacity(isCurrent ? 1 : (hovering ? 0.8 : (isPast ? 0.35 : 0.5))))
+                .foregroundStyle(Color.primary.opacity(isCurrent ? 1 : (hovering ? 0.8 : (isPast ? 0.35 : 0.5))))
                 .multilineTextAlignment(.leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 10).padding(.vertical, 7)
-                .background(RoundedRectangle(cornerRadius: 8).fill(.white.opacity(hovering ? 0.08 : 0)))
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(hovering ? 0.08 : 0)))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

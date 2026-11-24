@@ -1,5 +1,6 @@
 import AppKit
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private var controller: PlayerWindowController!
 
@@ -57,6 +58,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         item(view, "Reload", #selector(reload), "r")
         view.addItem(.separator())
         item(view, "Show Lyrics", #selector(toggleLyrics), "l")
+        item(view, "Show Web Player", #selector(toggleWebPlayer), "W", [.command, .shift])
         view.addItem(.separator())
         let fs = view.addItem(withTitle: "Enter Full Screen", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
         fs.keyEquivalentModifierMask = [.command, .control]
@@ -102,7 +104,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             menuItem.state = UserDefaults.standard.bool(forKey: Prefs.audioOnly) ? .on : .off
             return true
         case #selector(toggleLyrics):
-            menuItem.state = controller.lyricsVisible ? .on : .off
+            menuItem.state = controller.model.showLyrics ? .on : .off
+            return true
+        case #selector(toggleWebPlayer):
+            menuItem.state = controller.model.webMode ? .on : .off
             return true
         default:
             return true
@@ -111,15 +116,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     // MARK: Actions
 
-    @objc private func goBack() { controller.webView.goBack() }
-    @objc private func goForward() { controller.webView.goForward() }
-    @objc private func goHome() { controller.loadHome() }
-    @objc private func reload() { controller.webView.reload() }
-    @objc private func playPause() { controller.run("playPause()") }
-    @objc private func nextTrack() { controller.run("next()") }
-    @objc private func previousTrack() { controller.run("previous()") }
-    @objc private func toggleLyrics() { controller.toggleLyrics() }
-    @objc private func signIn() { controller.signIn() }
+    @objc private func goBack() { controller.model.goBack() }
+    @objc private func goForward() { controller.model.goForward() }
+    @objc private func goHome() { controller.model.open(.home) }
+    @objc private func reload() { controller.model.reload() }
+    @objc private func playPause() { controller.model.playPause() }
+    @objc private func nextTrack() { controller.model.next() }
+    @objc private func previousTrack() { controller.model.previous() }
+    @objc private func toggleLyrics() { controller.model.showLyrics.toggle() }
+    @objc private func toggleWebPlayer() { controller.model.webMode.toggle() }
+    @objc private func signIn() { controller.model.signIn() }
     @objc private func showPlayer() { controller.showWindow(nil) }
 
     @objc private func toggleAudioOnly() {
