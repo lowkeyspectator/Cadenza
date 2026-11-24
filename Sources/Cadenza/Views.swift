@@ -32,6 +32,9 @@ struct RootView: View {
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
+        // Opaque backing: the web player sits underneath this view, and without it the player
+        // shows through the hairline dividers between the columns.
+        .background(Color(nsColor: .windowBackgroundColor))
         .tint(Theme.accent)
         .ignoresSafeArea()
     }

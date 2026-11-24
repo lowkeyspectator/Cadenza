@@ -72,7 +72,8 @@ enum LyricsService {
             let album = fold(track.album)
             let sameAlbum = candidates.filter {
                 let theirs = fold($0.albumName ?? "")
-                return !album.isEmpty && !theirs.isEmpty && (theirs.contains(album) || album.contains(theirs))
+                // Exact album only: "DC" and "DC (Telugu)" are different-language releases.
+                return !album.isEmpty && theirs == album
             }
             let best = sameAlbum.first { !($0.syncedLyrics ?? "").isEmpty } ?? sameAlbum.first
             return best.flatMap(result(from:)) ?? .notFound
@@ -88,6 +89,23 @@ enum LyricsService {
             return .synced(lines)
         }
         return .plain(reference)
+    }
+
+    /// The non-Latin writing systems that make up a meaningful share of a text, as Unicode blocks
+    /// (Tamil, Telugu, Devanagari, Hangul, …).
+    static func scripts(_ s: String) -> Set<UInt32> {
+        var counts: [UInt32: Int] = [:]
+        var letters = 0
+        for scalar in s.unicodeScalars where scalar.properties.isAlphabetic {
+            letters += 1
+            if scalar.value >= 0x0370 {
+                // CJK ideographs span many blocks; treat them as one.
+                let block = (0x3400...0x9FFF).contains(scalar.value) ? 0x3400 : scalar.value / 0x80
+                counts[block, default: 0] += 1
+            }
+        }
+        guard letters > 0 else { return [] }
+        return Set(counts.filter { Double($0.value) / Double(letters) >= 0.08 }.keys)
     }
 
     private static func fold(_ s: String) -> String {
@@ -113,6 +131,9 @@ enum LyricsService {
             let chars = Array(letters.prefix(6000))
             return Set(zip(chars, chars.dropFirst()).map { String([$0, $1]) })
         }
+        // Different writing systems means a different-language version (or a romanisation), even
+        // when the two share an English chorus.
+        guard scripts(a) == scripts(b) else { return 0 }
         let x = units(a), y = units(b)
         guard !x.isEmpty, !y.isEmpty else { return 0 }
         // Share of the smaller text found in the larger one: tolerant of a missing verse or ad-libs.
