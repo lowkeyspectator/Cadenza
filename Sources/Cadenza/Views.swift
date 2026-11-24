@@ -14,23 +14,36 @@ struct RootView: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
-        HStack(spacing: 0) {
-            SidebarView(model: model)
-                .frame(width: 228)
-            Divider()
-            VStack(spacing: 0) {
-                TopBar(model: model)
-                ContentView(model: model)
-                Divider()
-                PlayerBar(model: model)
+        GeometryReader { geo in
+            // Adapt to the window: drop the sidebar, then the lyrics column, as it narrows.
+            let width = geo.size.width
+            let showSidebar = !model.sidebarHidden && width >= 820
+            let showLyrics = model.showLyrics && width >= 640
+            let lyricsWidth = min(330, width * 0.4)
+            let mainWidth = width - (showSidebar ? 229 : 0) - (showLyrics ? lyricsWidth + 1 : 0)
+            HStack(spacing: 0) {
+                if showSidebar {
+                    SidebarView(model: model)
+                        .frame(width: 228)
+                        .transition(.move(edge: .leading))
+                    Divider()
+                }
+                VStack(spacing: 0) {
+                    TopBar(model: model, sidebarShown: showSidebar, canShowSidebar: width >= 820)
+                    ContentView(model: model)
+                    Divider()
+                    PlayerBar(model: model, compact: mainWidth < 700)
+                }
+                .frame(maxWidth: .infinity)
+                .background(Color(nsColor: .windowBackgroundColor))
+                if showLyrics {
+                    Divider()
+                    LyricsView(model: model.lyrics)
+                        .frame(width: lyricsWidth)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
             }
-            .background(Color(nsColor: .windowBackgroundColor))
-            if model.showLyrics {
-                Divider()
-                LyricsView(model: model.lyrics)
-                    .frame(width: 330)
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
-            }
+            .animation(.spring(response: 0.32, dampingFraction: 0.9), value: showSidebar)
         }
         // Opaque backing: the web player sits underneath this view, and without it the player
         // shows through the hairline dividers between the columns.
@@ -66,10 +79,12 @@ struct WebModeBar: View {
 
 // MARK: Sidebar
 
-private struct SidebarMaterial: NSViewRepresentable {
+struct VisualEffect: NSViewRepresentable {
+    var material: NSVisualEffectView.Material = .sidebar
+
     func makeNSView(context: Context) -> NSVisualEffectView {
         let view = NSVisualEffectView()
-        view.material = .sidebar
+        view.material = material
         view.blendingMode = .behindWindow
         view.state = .followsWindowActiveState
         return view
@@ -140,7 +155,7 @@ struct SidebarView: View {
             }
             .padding(.horizontal, 14).padding(.vertical, 10)
         }
-        .background(SidebarMaterial())
+        .background(VisualEffect())
     }
 
     private func heading(_ title: String) -> some View {
@@ -173,14 +188,32 @@ struct SidebarView: View {
 
 struct TopBar: View {
     @ObservedObject var model: AppModel
+    let sidebarShown: Bool
+    let canShowSidebar: Bool
 
     var body: some View {
         HStack(spacing: 4) {
+            if !sidebarShown { Spacer().frame(width: 62) } // traffic lights
+            Button { model.toggleSidebar() } label: { Image(systemName: "sidebar.left") }
+                .disabled(!canShowSidebar)
+                .help("Show or hide the sidebar")
             Button { model.goBack() } label: { Image(systemName: "chevron.left") }
                 .disabled(model.backStack.isEmpty)
             Button { model.goForward() } label: { Image(systemName: "chevron.right") }
                 .disabled(model.forwardStack.isEmpty)
             Spacer()
+            if !sidebarShown {
+                // The sidebar holds the search field, so offer one here while it is hidden.
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    TextField("Search", text: $model.searchText)
+                        .textFieldStyle(.plain).font(.system(size: 13))
+                        .onSubmit { model.submitSearch() }
+                }
+                .padding(.horizontal, 8).padding(.vertical, 5)
+                .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.primary.opacity(0.07)))
+                .frame(maxWidth: 220)
+            }
         }
         .buttonStyle(.borderless)
         .font(.system(size: 15, weight: .medium))
@@ -473,7 +506,7 @@ struct ItemMenu: View {
     }
 }
 
-private struct PressableStyle: ButtonStyle {
+struct PressableStyle: ButtonStyle {
     var scale = 0.97
 
     func makeBody(configuration: Configuration) -> some View {
@@ -488,6 +521,7 @@ private struct PressableStyle: ButtonStyle {
 
 struct PlayerBar: View {
     @ObservedObject var model: AppModel
+    var compact = false
 
     var body: some View {
         let now = model.now
@@ -529,23 +563,28 @@ struct PlayerBar: View {
 
             // Volume and panels
             HStack(spacing: 10) {
-                if !now.format.isEmpty {
+                if !now.format.isEmpty && !compact {
                     Text(now.format).font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
                         .padding(.horizontal, 6).padding(.vertical, 2)
                         .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color.secondary.opacity(0.4)))
                         .help("Audio stream currently playing")
                         .fixedSize()
                 }
-                VolumeSlider(model: model, volume: model.volume)
+                if !compact { VolumeSlider(model: model, volume: model.volume) }
                 Button { model.toggleLyrics() } label: {
                     Image(systemName: model.showLyrics ? "quote.bubble.fill" : "quote.bubble")
                         .foregroundStyle(model.showLyrics ? Theme.accent : Color.primary)
                 }
                 .buttonStyle(PressableStyle(scale: 0.88)).font(.system(size: 15))
                 .help("Lyrics")
+                Button { model.toggleMiniPlayer?() } label: {
+                    Image(systemName: "arrow.down.right.and.arrow.up.left")
+                }
+                .buttonStyle(PressableStyle(scale: 0.88)).font(.system(size: 13))
+                .help("Switch to MiniPlayer")
             }
         }
-        .padding(.horizontal, 20)
+        .padding(.horizontal, compact ? 12 : 20)
         .frame(height: 68)
         .background(.bar)
     }
@@ -561,7 +600,7 @@ struct PlayerBar: View {
 }
 
 /// Redraws on every clock tick, so it is its own small view.
-private struct Scrubber: View {
+struct Scrubber: View {
     let model: AppModel
     @ObservedObject var clock: PlaybackClock
     let duration: Double
@@ -592,7 +631,7 @@ private struct Scrubber: View {
     }
 }
 
-private struct VolumeSlider: View {
+struct VolumeSlider: View {
     let model: AppModel
     @ObservedObject var volume: VolumeState
 

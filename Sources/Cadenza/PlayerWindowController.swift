@@ -7,7 +7,7 @@ import WebKit
 /// forward only for signing in or changing account settings ("web mode").
 @MainActor
 final class PlayerWindowController: NSWindowController, WKNavigationDelegate, WKUIDelegate,
-    WKScriptMessageHandler, Engine
+    WKScriptMessageHandler, NSWindowDelegate, Engine
 {
     static let home = URL(string: "https://music.youtube.com/")!
     private static let webBarHeight: CGFloat = 52
@@ -23,6 +23,9 @@ final class PlayerWindowController: NSWindowController, WKNavigationDelegate, WK
     private var nativeHost: NSView!
     private var webBarHost: NSView!
     private var signingIn = false
+    private var miniPanel: NSPanel?
+    private var statusItem: NSStatusItem?
+    private var popover: NSPopover?
     private var observers: [Any] = []
 
     init() {
@@ -59,7 +62,7 @@ final class PlayerWindowController: NSWindowController, WKNavigationDelegate, WK
         window.title = "Cadenza"
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
-        window.minSize = NSSize(width: 860, height: 520)
+        window.minSize = NSSize(width: 520, height: 400)
         window.isReleasedWhenClosed = false
         window.tabbingMode = .disallowed
         window.center()
@@ -98,6 +101,9 @@ final class PlayerWindowController: NSWindowController, WKNavigationDelegate, WK
         window.contentView = container
 
         installKeyHandling()
+        model.toggleMiniPlayer = { [weak self] in self?.toggleMiniPlayer() }
+        model.showMainWindow = { [weak self] in self?.showMain() }
+        applyMenuBarPreference()
         observers.append(model.$webMode.sink { [weak self] on in self?.applyWebMode(on) })
         webView.load(URLRequest(url: Self.home))
     }
@@ -174,7 +180,8 @@ final class PlayerWindowController: NSWindowController, WKNavigationDelegate, WK
     /// Space toggles playback, as in Music, unless the user is typing or using the web player.
     private func installKeyHandling() {
         observers.append(NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self, event.window === self.window, !self.model.webMode,
+            guard let self, event.window === self.window || event.window === self.miniPanel,
+                  !self.model.webMode,
                   event.keyCode == 49, event.modifierFlags.intersection([.command, .option, .control]).isEmpty,
                   !(self.window?.firstResponder is NSText) else { return event }
             self.model.playPause()
@@ -194,6 +201,111 @@ final class PlayerWindowController: NSWindowController, WKNavigationDelegate, WK
     }
 
     func reloadPlayer() { webView.load(URLRequest(url: Self.home)) }
+
+    // MARK: MiniPlayer
+
+    var isMiniPlayer: Bool { miniPanel?.isVisible ?? false }
+
+    func toggleMiniPlayer() { isMiniPlayer ? showMain() : showMini() }
+
+    /// Collapses the app into a small floating player. Audio keeps running: the web player
+    /// stays loaded in the (hidden) main window.
+    func showMini() {
+        if model.webMode { model.webMode = false }
+        if miniPanel == nil {
+            let saved = MiniPlayerSize(rawValue: UserDefaults.standard.integer(forKey: "miniPlayerSize")) ?? .small
+            let panel = NSPanel(
+                contentRect: NSRect(origin: .zero, size: saved.size),
+                styleMask: [.titled, .closable, .resizable, .fullSizeContentView, .nonactivatingPanel],
+                backing: .buffered, defer: false)
+            panel.title = "MiniPlayer"
+            panel.titleVisibility = .hidden
+            panel.titlebarAppearsTransparent = true
+            panel.isFloatingPanel = true
+            panel.level = .floating
+            panel.hidesOnDeactivate = false
+            panel.isMovableByWindowBackground = true
+            panel.isReleasedWhenClosed = false
+            panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+            panel.minSize = NSSize(width: 280, height: 88)
+            panel.maxSize = NSSize(width: 640, height: 760)
+            panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
+            panel.standardWindowButton(.zoomButton)?.isHidden = true
+            panel.contentView = NSHostingView(rootView: MiniPlayerView(model: model))
+            panel.setContentSize(saved.size)
+            panel.delegate = self
+            // Start in the top-right corner unless the user has placed it before.
+            if !panel.setFrameUsingName("MiniPlayer"), let screen = (window?.screen ?? NSScreen.main)?.visibleFrame {
+                panel.setFrameTopLeftPoint(NSPoint(x: screen.maxX - saved.size.width - 24, y: screen.maxY - 24))
+            }
+            panel.setFrameAutosaveName("MiniPlayer")
+            miniPanel = panel
+        }
+        miniPanel?.alphaValue = 0
+        miniPanel?.orderFrontRegardless()
+        miniPanel?.makeKey()
+        miniPanel?.animator().alphaValue = 1
+        window?.orderOut(nil)
+    }
+
+    func showMain() {
+        popover?.performClose(nil)
+        miniPanel?.orderOut(nil)
+        showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func setMiniPlayerSize(_ size: MiniPlayerSize) {
+        UserDefaults.standard.set(size.rawValue, forKey: "miniPlayerSize")
+        if !isMiniPlayer { showMini() }
+        guard let panel = miniPanel else { return }
+        // Resize around the top-left corner, as a window the user is looking at should.
+        var frame = panel.frameRect(forContentRect: NSRect(origin: .zero, size: size.size))
+        frame.origin = NSPoint(x: panel.frame.minX, y: panel.frame.maxY - frame.height)
+        panel.setFrame(frame, display: true, animate: true)
+    }
+
+    /// Closing the MiniPlayer returns to the full window rather than leaving nothing on screen.
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        guard sender === miniPanel else { return true }
+        showMain()
+        return false
+    }
+
+    // MARK: Menu bar player
+
+    var menuBarPlayerEnabled: Bool { statusItem != nil }
+
+    func toggleMenuBarPlayer() {
+        UserDefaults.standard.set(!menuBarPlayerEnabled, forKey: Prefs.menuBarPlayer)
+        applyMenuBarPreference()
+    }
+
+    private func applyMenuBarPreference() {
+        let wanted = UserDefaults.standard.bool(forKey: Prefs.menuBarPlayer)
+        if wanted, statusItem == nil {
+            let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+            item.button?.image = NSImage(systemSymbolName: "music.note", accessibilityDescription: "Cadenza")
+            item.button?.target = self
+            item.button?.action = #selector(togglePopover(_:))
+            statusItem = item
+        } else if !wanted, let item = statusItem {
+            popover?.performClose(nil)
+            NSStatusBar.system.removeStatusItem(item)
+            statusItem = nil
+        }
+    }
+
+    @objc private func togglePopover(_ sender: NSStatusBarButton) {
+        if let popover, popover.isShown { popover.performClose(nil); return }
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.contentViewController = NSHostingController(
+            rootView: MenuBarPlayerView(model: model) { NSApp.terminate(nil) })
+        popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
+        popover.contentViewController?.view.window?.makeKey()
+        self.popover = popover
+    }
 
     // MARK: Bridge
 

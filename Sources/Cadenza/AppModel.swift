@@ -127,6 +127,13 @@ final class AppModel: ObservableObject {
         didSet { UserDefaults.standard.set(showLyrics, forKey: Prefs.showLyrics) }
     }
     @Published var webMode = false
+    @Published var sidebarHidden = UserDefaults.standard.bool(forKey: Prefs.sidebarHidden) {
+        didSet { UserDefaults.standard.set(sidebarHidden, forKey: Prefs.sidebarHidden) }
+    }
+
+    /// Window-level actions, provided by the window controller.
+    var toggleMiniPlayer: (() -> Void)?
+    var showMainWindow: (() -> Void)?
 
     let clock = PlaybackClock()
     let volume = VolumeState()
@@ -243,6 +250,8 @@ final class AppModel: ObservableObject {
             if self.route == origin { self.page = page }
         }
     }
+
+    func toggleSidebar() { sidebarHidden.toggle() }
 
     func toggleLyrics() {
         withAnimation(.spring(response: 0.32, dampingFraction: 0.9)) { showLyrics.toggle() }

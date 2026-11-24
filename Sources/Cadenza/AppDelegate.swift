@@ -5,7 +5,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private var controller: PlayerWindowController!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        UserDefaults.standard.register(defaults: [Prefs.audioOnly: true, Prefs.showLyrics: true])
+        UserDefaults.standard.register(defaults: [Prefs.audioOnly: true, Prefs.showLyrics: true, Prefs.menuBarPlayer: true])
         controller = PlayerWindowController()
         NSApp.mainMenu = buildMenu()
         controller.showWindow(nil)
@@ -16,7 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if !flag { controller.showWindow(nil) }
+        if !flag { controller.showMain() }
         return true
     }
 
@@ -59,7 +59,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         item(view, "Home", #selector(goHome), "H", [.command, .shift])
         item(view, "Reload", #selector(reload), "r")
         view.addItem(.separator())
+        let sidebar = item(view, "Show Sidebar", #selector(toggleSidebar), "s")
+        sidebar.keyEquivalentModifierMask = [.command, .control]
         item(view, "Show Lyrics", #selector(toggleLyrics), "l")
+        item(view, "Show Player in Menu Bar", #selector(toggleMenuBarPlayer), "")
         item(view, "Show Web Player", #selector(toggleWebPlayer), "W", [.command, .shift])
         view.addItem(.separator())
         let fs = view.addItem(withTitle: "Enter Full Screen", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
@@ -78,7 +81,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         window.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
         window.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
         window.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
-        item(window, "Show Player", #selector(showPlayer), "0")
+        item(window, "Cadenza", #selector(showPlayer), "0")
+        item(window, "Switch to MiniPlayer", #selector(toggleMiniPlayer), "M", [.command, .shift])
+        let sizes = NSMenu(title: "MiniPlayer Size")
+        for size in MiniPlayerSize.allCases {
+            let entry = item(sizes, size.title, #selector(setMiniPlayerSize(_:)), "")
+            entry.tag = size.rawValue
+        }
+        let sizesItem = NSMenuItem(title: "MiniPlayer Size", action: nil, keyEquivalent: "")
+        sizesItem.submenu = sizes
+        window.addItem(sizesItem)
         add(window, titled: "Window", to: main)
         NSApp.windowsMenu = window
 
@@ -108,6 +120,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         case #selector(toggleLyrics):
             menuItem.state = controller.model.showLyrics ? .on : .off
             return true
+        case #selector(toggleSidebar):
+            menuItem.state = controller.model.sidebarHidden ? .off : .on
+            return true
+        case #selector(toggleMenuBarPlayer):
+            menuItem.state = controller.menuBarPlayerEnabled ? .on : .off
+            return true
+        case #selector(toggleMiniPlayer):
+            menuItem.title = controller.isMiniPlayer ? "Switch from MiniPlayer" : "Switch to MiniPlayer"
+            return true
         case #selector(toggleWebPlayer):
             menuItem.state = controller.model.webMode ? .on : .off
             return true
@@ -129,7 +150,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     @objc private func search() { controller.focusSearch() }
     @objc private func toggleWebPlayer() { controller.model.webMode.toggle() }
     @objc private func signIn() { controller.model.signIn() }
-    @objc private func showPlayer() { controller.showWindow(nil) }
+    @objc private func showPlayer() { controller.showMain() }
+    @objc private func toggleSidebar() { controller.model.toggleSidebar() }
+    @objc private func toggleMenuBarPlayer() { controller.toggleMenuBarPlayer() }
+    @objc private func toggleMiniPlayer() { controller.toggleMiniPlayer() }
+    @objc private func setMiniPlayerSize(_ sender: NSMenuItem) {
+        if let size = MiniPlayerSize(rawValue: sender.tag) { controller.setMiniPlayerSize(size) }
+    }
+
+    /// Dock icon menu: transport controls without bringing the app forward.
+    func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        let menu = NSMenu()
+        let now = controller.model.now
+        if !now.isEmpty {
+            menu.addItem(withTitle: "\(now.title) — \(now.artist)", action: nil, keyEquivalent: "")
+            menu.addItem(.separator())
+        }
+        item(menu, now.playing ? "Pause" : "Play", #selector(playPause), "")
+        item(menu, "Next", #selector(nextTrack), "")
+        item(menu, "Previous", #selector(previousTrack), "")
+        menu.addItem(.separator())
+        item(menu, controller.isMiniPlayer ? "Switch from MiniPlayer" : "Switch to MiniPlayer",
+             #selector(toggleMiniPlayer), "")
+        return menu
+    }
 
     @objc private func toggleAudioOnly() {
         let on = !UserDefaults.standard.bool(forKey: Prefs.audioOnly)
@@ -141,4 +185,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 enum Prefs {
     static let audioOnly = "audioOnly"
     static let showLyrics = "showLyrics"
+    static let sidebarHidden = "sidebarHidden"
+    static let menuBarPlayer = "menuBarPlayer"
 }

@@ -15,6 +15,15 @@ and it does not block ads.
   and playlist pages have Play and Shuffle. Follows the system light or dark appearance.
 - **Player bar** with transport controls, scrubber, volume, and a badge showing the audio stream actually
   playing (for example "Opus 160 kbps").
+- **MiniPlayer** (`⇧⌘M`, or the button at the right of the player bar). Collapses the app into a small
+  floating window that stays above other apps; the expand button, closing it, or `⇧⌘M` again brings the
+  full window back. It can be resized freely or set to Small, Medium or Large under *Window ▸ MiniPlayer
+  Size*; the layout changes from a slim strip to large artwork as it grows.
+- **Menu bar player.** A music-note icon in the menu bar opens a popover with the current track, transport
+  controls, scrubber and volume. Turn it off under *View ▸ Show Player in Menu Bar*.
+- **Dock menu** with Play/Pause, Next and Previous.
+- **Resizes down to a small window.** The sidebar and lyrics column fold away as the window narrows, and
+  the sidebar can be hidden by hand (`⌃⌘S`).
 - **Audio only.** On by default (*Playback ▸ Audio Only (No Video)*). With Premium, tracks are switched to
   their song version using YouTube Music's own Song/Video switch. Where YouTube Music only offers a video
   stream (no Premium, or a video-only upload), the picture is hidden behind the cover art and fetched at
@@ -34,7 +43,9 @@ and it does not block ads.
 
 ### Audio quality
 
-The app never lowers audio quality, but the ceiling is set by your account, not by the app. Signed out or
+YouTube Music's best stream is 256 kbps (AAC or Opus). It offers no lossless/FLAC tier and no 320 kbps
+tier, so no client can play more than that. The app never lowers audio quality, but the ceiling is set by
+the service and your account, not by the app. Signed out or
 on a free account the web player serves about 160 kbps Opus. For the top tier (256 kbps, Premium only), set
 it once in the web player (globe button): **profile picture ▸ Settings ▸ Playback ▸ Audio quality ▸
 High**. The badge in the player bar shows the result.
@@ -70,6 +81,7 @@ The app is ad-hoc signed for local use. Copy `build/Cadenza.app` to `/Applicatio
 - Long playlists and library lists load more as you scroll; the Home and Explore feeds show only their
   first batch of shelves.
 - No queue view, like button, or playlist editing yet. Use the web player for those.
+- No desktop or Notification Center widget: those need an app extension built with Xcode.
 - On a free account, ads play in the hidden web player. The player bar shows "Advertisement" until the
   ad ends.
 
@@ -79,6 +91,8 @@ The app is ad-hoc signed for local use. Copy `build/Cadenza.app` to `/Applicatio
 | --- | --- |
 | `Sources/Cadenza/Views.swift` | SwiftUI interface: sidebar, pages, player bar |
 | `Sources/Cadenza/AppModel.swift` | App state, navigation, data models |
+| `Sources/Cadenza/MiniPlayer.swift` | MiniPlayer and menu bar popover |
+| `Sources/Cadenza/Artwork.swift` | Cached artwork loading |
 | `Sources/Cadenza/Lyrics.swift` | LRCLIB client, LRC parser, lyrics panel |
 | `Sources/Cadenza/BridgeScript.swift` | JavaScript injected into the web player: data requests, playback, audio only |
 | `Sources/Cadenza/PlayerWindowController.swift` | Window, hidden web player, sign-in handling |
