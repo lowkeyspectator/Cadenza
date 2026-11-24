@@ -62,7 +62,24 @@ Left alone, Google would still pick the passkey step and fail with "Something we
 Bluetooth is on". To avoid that, the app hides the passkey API from Google's sign-in pages so Google offers
 your other sign-in methods instead. If a passkey prompt still appears, choose **Try another way**.
 
-## Build
+## Install
+
+**Requirements:** macOS 14 Sonoma or later, on Apple Silicon or Intel.
+
+1. Download `Cadenza.zip` from the [latest release](https://github.com/lowkeyspectator/Cadenza/releases/latest).
+2. Unzip it and drag **Cadenza.app** into your **Applications** folder.
+3. Open it. The app isn't notarized by Apple, so the first launch is blocked with a message that macOS
+   couldn't verify it. To allow it:
+   - Open **System Settings → Privacy & Security**, scroll down to the message about Cadenza, click
+     **Open Anyway** and confirm. Or
+   - run this once in Terminal:
+     ```bash
+     xattr -dr com.apple.quarantine /Applications/Cadenza.app
+     ```
+
+To uninstall, quit Cadenza and delete `/Applications/Cadenza.app`.
+
+## Build from source
 
 Requires macOS 14+ and the Swift toolchain (Xcode or just the Command Line Tools).
 
