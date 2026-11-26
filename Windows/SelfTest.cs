@@ -34,8 +34,20 @@ internal static class SelfTest
             }
             Note("home " + State());
             Snapshot(window, logPath, "home");
-            var ids = vm.Page?.Sections.SelectMany(s => s.Items).Select(x => x.VideoId).OfType<string>().Distinct().ToList() ?? new();
-            if (ids.Count < 2) { Note("FAIL no songs on Home"); return; }
+            List<string> Songs() =>
+                vm.Page?.Sections.SelectMany(s => s.Items).Select(x => x.VideoId).OfType<string>().Distinct().ToList() ?? new();
+            var ids = Songs();
+            if (ids.Count < 2)
+            {
+                // Signed out, Home holds only playlists and albums: find songs with a search.
+                vm.SearchText = "daft punk";
+                vm.SubmitSearch();
+                for (var i = 0; i < 30 && (vm.Loading || vm.Page == null); i++) await Task.Delay(500);
+                Note("search " + State());
+                Snapshot(window, logPath, "search");
+                ids = Songs();
+            }
+            if (ids.Count < 2) { Note("FAIL no songs found"); return; }
 
             Note($"play {ids[0]} then {ids[1]} one second later");
             vm.Play(ids[0], null);
@@ -53,11 +65,10 @@ internal static class SelfTest
             Note($"volume set 40 → model {vm.Volume}");
             Snapshot(window, logPath, "playing");
 
-            vm.SearchText = "lofi";
-            vm.SubmitSearch();
+            vm.Open(Route.Browse("FEmusic_explore", "Explore"));
             for (var i = 0; i < 20 && (vm.Loading || vm.Page == null); i++) await Task.Delay(500);
-            Note("search " + State());
-            Snapshot(window, logPath, "search");
+            Note("explore " + State());
+            Snapshot(window, logPath, "explore");
             vm.PlayPause();
             Note("DONE");
         }
