@@ -124,8 +124,14 @@ final class AppModel: ObservableObject {
     @Published private(set) var ready = false
     @Published private(set) var now = NowPlaying()
     @Published var showLyrics = UserDefaults.standard.bool(forKey: Prefs.showLyrics) {
-        didSet { UserDefaults.standard.set(showLyrics, forKey: Prefs.showLyrics) }
+        didSet {
+            UserDefaults.standard.set(showLyrics, forKey: Prefs.showLyrics)
+            // Lyrics are only looked up while the panel is open; catch up when it opens.
+            if showLyrics { lyrics.setTrack(currentTrack) }
+        }
     }
+    /// The playing track, as the lyrics panel needs it.
+    private var currentTrack = Track()
     @Published var webMode = false
     @Published var sidebarHidden = UserDefaults.standard.bool(forKey: Prefs.sidebarHidden) {
         didSet { UserDefaults.standard.set(sidebarHidden, forKey: Prefs.sidebarHidden) }
@@ -144,6 +150,8 @@ final class AppModel: ObservableObject {
     private var loadTask: Task<Void, Never>?
 
     private var loadingMore: Set<String> = []
+    /// Continuation tokens whose last fetch failed.
+    @Published private(set) var failedMore: Set<String> = []
 
     init() {
         lyrics.onSeek = { [weak self] in self?.seek(to: $0) }
@@ -183,7 +191,33 @@ final class AppModel: ObservableObject {
 
     func reload() {
         cache[route] = nil
+        // If the player itself never came up (offline at launch), load it again first.
+        if !ready { engine?.reloadPlayer() }
         show(route)
+    }
+
+    /// Called once at launch: shows the spinner and starts the timeout while the player loads.
+    func start() { show(route) }
+
+    /// The web player page failed to load.
+    func playerFailed(_ reason: String) {
+        guard !ready else { return } // already running; a later sub-navigation failing is harmless
+        readyTimeout?.cancel()
+        loading = false
+        error = "Couldn’t reach YouTube Music. Check your internet connection and try again.\n\(reason)"
+    }
+
+    private var readyTimeout: Task<Void, Never>?
+
+    /// Gives up waiting for the player after a while, so the page shows an error instead of a spinner.
+    private func startReadyTimeout() {
+        readyTimeout?.cancel()
+        readyTimeout = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 30_000_000_000)
+            guard let self, !Task.isCancelled, !self.ready, self.error == nil else { return }
+            self.loading = false
+            self.error = "YouTube Music is taking too long to load. Check your internet connection and try again."
+        }
     }
 
     private func show(_ new: Route) {
@@ -198,7 +232,11 @@ final class AppModel: ObservableObject {
         }
         page = nil
         pageVersion += 1
-        guard ready else { loading = true; return } // loads as soon as the player reports in
+        guard ready else { // loads as soon as the player reports in
+            loading = true
+            startReadyTimeout()
+            return
+        }
         loading = true
         loadTask = Task { [weak self] in
             guard let self, let engine = self.engine else { return }
@@ -233,6 +271,7 @@ final class AppModel: ObservableObject {
     /// Fetches the next batch of a long list (playlists over ~100 tracks, big libraries).
     func loadMore(_ section: PageSection) {
         guard let token = section.continuation, !loadingMore.contains(token), let engine else { return }
+        failedMore.remove(token)
         loadingMore.insert(token)
         let origin = route
         Task { [weak self] in
@@ -240,8 +279,11 @@ final class AppModel: ObservableObject {
             let data = try? await engine.fetch("more(token)", ["token": token])
             guard let self else { return }
             self.loadingMore.remove(token)
-            guard let data, let batch = try? JSONDecoder().decode(Batch.self, from: data),
-                  var page = self.cache[origin],
+            guard let data, let batch = try? JSONDecoder().decode(Batch.self, from: data) else {
+                self.failedMore.insert(token) // the list offers Try Again instead of spinning
+                return
+            }
+            guard var page = self.cache[origin],
                   let index = page.sections.firstIndex(where: { $0.continuation == token }) else { return }
             page.sections[index].items += batch.items
             // An empty batch means the list is finished even if a token came back.
@@ -254,7 +296,7 @@ final class AppModel: ObservableObject {
     func toggleSidebar() { sidebarHidden.toggle() }
 
     func toggleLyrics() {
-        withAnimation(.spring(response: 0.32, dampingFraction: 0.9)) { showLyrics.toggle() }
+        withAnimation(motion(.spring(response: 0.32, dampingFraction: 0.9))) { showLyrics.toggle() }
     }
 
     // MARK: Items
@@ -273,12 +315,7 @@ final class AppModel: ObservableObject {
 
     func play(videoId: String?, playlistId: String?, shuffled: Bool = false) {
         guard videoId != nil || playlistId != nil else { return }
-        var args = "\(js(videoId)), \(js(playlistId))"
-        if args.isEmpty { args = "null, null" }
-        engine?.run("play(\(args))")
-        if shuffled {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in self?.engine?.run("shuffle()") }
-        }
+        engine?.run("play(\(js(videoId)), \(js(playlistId)), \(shuffled))")
     }
 
     private func js(_ value: String?) -> String {
@@ -315,6 +352,7 @@ final class AppModel: ObservableObject {
         let isLoggedIn = body["loggedIn"] as? Bool ?? false
         let sessionChanged = isReady && (!ready || isLoggedIn != loggedIn)
         if isReady {
+            readyTimeout?.cancel()
             ready = true
             loggedIn = isLoggedIn
         }
@@ -344,9 +382,11 @@ final class AppModel: ObservableObject {
         if let v = body["volume"] as? Double, abs(v - volume.level) > 0.5,
            Date().timeIntervalSince(volume.lastSet) > 1.5 { volume.level = v }
 
-        lyrics.setTrack(Track(
+        currentTrack = Track(
             id: updated.id, title: updated.title, artist: updated.artist,
-            album: body["album"] as? String ?? "", duration: updated.duration))
+            album: body["album"] as? String ?? "", duration: updated.duration)
+        // Nothing is sent to LRCLIB while the lyrics panel is closed.
+        if showLyrics { lyrics.setTrack(currentTrack) }
     }
 
     func playerTime(id: String, _ t: Double) {

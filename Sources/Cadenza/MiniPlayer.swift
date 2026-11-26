@@ -9,12 +9,15 @@ private struct Transport: View {
     var body: some View {
         HStack(spacing: size * 1.1) {
             Button { model.previous() } label: { Image(systemName: "backward.fill") }
+                .accessibilityLabel("Previous")
             Button { model.playPause() } label: {
                 Image(systemName: model.now.playing ? "pause.fill" : "play.fill")
                     .font(.system(size: size * 1.45)).frame(width: size * 1.7)
                     .contentTransition(.symbolEffect(.replace))
             }
+            .accessibilityLabel(model.now.playing ? "Pause" : "Play")
             Button { model.next() } label: { Image(systemName: "forward.fill") }
+                .accessibilityLabel("Next")
         }
         .font(.system(size: size))
         .buttonStyle(PressableStyle(scale: 0.88))
@@ -129,6 +132,7 @@ struct MiniPlayerView: View {
         }
         .buttonStyle(PressableStyle(scale: 0.88))
         .help("Return to the full window")
+        .accessibilityLabel("Return to the full window")
     }
 }
 

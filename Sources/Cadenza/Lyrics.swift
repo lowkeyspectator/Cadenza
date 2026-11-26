@@ -37,7 +37,8 @@ enum LyricsService {
     ///   LRCLIB is matched only by title, artist and length, so the same title can come back as a
     ///   translation, a romanisation or a different song. The reference decides which candidate is
     ///   really this recording; if none is, the reference itself is shown rather than wrong lyrics.
-    static func fetch(_ track: Track, reference: String?) async -> Result {
+    /// Throws only when LRCLIB could not be reached, so that is not mistaken for "no lyrics".
+    static func fetch(_ track: Track, reference: String?) async throws -> Result {
         var candidates: [Entry] = []
 
         var exact = URLComponents(string: "https://lrclib.net/api/get")!
@@ -47,7 +48,7 @@ enum LyricsService {
             URLQueryItem(name: "duration", value: String(Int(track.duration.rounded()))),
         ]
         if !track.album.isEmpty { exact.queryItems?.append(URLQueryItem(name: "album_name", value: track.album)) }
-        if let entry: Entry = await get(exact.url!) { candidates.append(entry) }
+        if let entry: Entry = try await get(exact.url!) { candidates.append(entry) }
 
         let reference = (reference ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let trusted = candidates.first.map { reference.isEmpty || similarity(text(of: $0), reference) >= 0.6 } ?? false
@@ -58,7 +59,7 @@ enum LyricsService {
                 URLQueryItem(name: "track_name", value: simplified(track.title)),
                 URLQueryItem(name: "artist_name", value: primaryArtist(track.artist)),
             ]
-            if let entries: [Entry] = await get(search.url!) {
+            if let entries: [Entry] = try await get(search.url!) {
                 candidates += entries
                     .filter { abs(($0.duration ?? 0) - track.duration) <= 4 }
                     .sorted { abs(($0.duration ?? 0) - track.duration) < abs(($1.duration ?? 0) - track.duration) }
@@ -150,11 +151,19 @@ enum LyricsService {
         return nil
     }
 
-    private static func get<T: Decodable>(_ url: URL) async -> T? {
+    private static let userAgent: String = {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
+        return "Cadenza/\(version) (macOS music player; https://github.com/lowkeyspectator/Cadenza)"
+    }()
+
+    /// nil when LRCLIB has no entry; throws when it could not be reached or is failing.
+    private static func get<T: Decodable>(_ url: URL) async throws -> T? {
         var request = URLRequest(url: url, timeoutInterval: 15)
-        request.setValue("Cadenza/1.1 (macOS music player)", forHTTPHeaderField: "User-Agent")
-        guard let (data, response) = try? await URLSession.shared.data(for: request),
-              (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        if status == 429 || status >= 500 { throw URLError(.badServerResponse) }
+        guard status == 200 else { return nil }
         return try? JSONDecoder().decode(T.self, from: data)
     }
 
@@ -196,7 +205,7 @@ enum LyricsService {
 
 @MainActor
 final class LyricsModel: ObservableObject {
-    enum Status: Equatable { case idle, loading, synced, plain(String), instrumental, notFound }
+    enum Status: Equatable { case idle, loading, synced, plain(String), instrumental, notFound, failed }
 
     @Published private(set) var track = Track()
     @Published private(set) var status: Status = .idle
@@ -229,10 +238,28 @@ final class LyricsModel: ObservableObject {
             if Task.isCancelled { return }
             let reference = await self?.reference?(new.id)
             if Task.isCancelled { return }
-            let result = await LyricsService.fetch(new, reference: reference)
-            if Task.isCancelled { return }
-            self?.apply(result, checked: !(reference ?? "").isEmpty)
+            do {
+                let result = try await LyricsService.fetch(new, reference: reference)
+                if Task.isCancelled { return }
+                self?.apply(result, checked: !(reference ?? "").isEmpty)
+            } catch {
+                if Task.isCancelled { return }
+                // Offline or LRCLIB down: YouTube Music's own lyrics are still worth showing.
+                if let reference, !reference.isEmpty {
+                    self?.apply(.plain(reference), checked: true)
+                } else {
+                    self?.status = .failed
+                }
+            }
         }
+    }
+
+    /// Looks the current track up again (after a network failure).
+    func retry() {
+        let current = track
+        track = Track()
+        status = .idle
+        setTrack(current)
     }
 
     private func apply(_ result: LyricsService.Result, checked: Bool) {
@@ -298,6 +325,13 @@ struct LyricsView: View {
         case .idle: message("Play a song to see its lyrics.")
         case .loading: ProgressView().controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity)
         case .notFound: message("No lyrics found for this song.")
+        case .failed:
+            VStack(spacing: 10) {
+                Text("Couldn’t load lyrics. Check your internet connection.")
+                    .foregroundStyle(.secondary).multilineTextAlignment(.center)
+                Button("Try Again") { model.retry() }
+            }
+            .padding(24).frame(maxWidth: .infinity, maxHeight: .infinity)
         case .instrumental: message("Instrumental")
         case .plain(let text):
             ScrollView {
@@ -320,9 +354,9 @@ struct LyricsView: View {
                     }
                     .padding(.horizontal, 12).padding(.vertical, 120)
                 }
-                .onChange(of: model.currentIndex) { index in
+                .onChange(of: model.currentIndex) { _, index in
                     guard let index else { return }
-                    withAnimation(.easeInOut(duration: 0.35)) { proxy.scrollTo(index, anchor: .center) }
+                    withAnimation(motion(.easeInOut(duration: 0.35))) { proxy.scrollTo(index, anchor: .center) }
                 }
             }
         }
@@ -358,7 +392,9 @@ private struct LineRow: View {
         .buttonStyle(.plain)
         .onHover { hover.wrappedValue = $0 }
         .help("Jump to \(Self.stamp(line.time))")
-        .animation(.easeInOut(duration: 0.2), value: isCurrent)
+        .accessibilityHint("Jumps to \(Self.stamp(line.time))")
+        .accessibilityAddTraits(isCurrent ? .isSelected : [])
+        .animation(motion(.easeInOut(duration: 0.2)), value: isCurrent)
     }
 
     private static func stamp(_ t: Double) -> String {

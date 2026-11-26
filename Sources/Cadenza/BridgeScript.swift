@@ -5,7 +5,8 @@ let bridgeScript = #"""
 //  - fetches browse/search data for the native interface
 //  - starts playback and reports the current track, audio format and position
 (function () {
-  if (window.__cadenza) return;
+  // Only the player page gets the bridge: never Google's sign-in or any other page.
+  if (window.__cadenza || location.hostname !== 'music.youtube.com') return;
 
   const post = (msg) => {
     try { window.webkit.messageHandlers.cadenza.postMessage(msg); } catch (e) {}
@@ -264,20 +265,43 @@ let bridgeScript = #"""
   api.loggedIn = () => !!(window.ytcfg && window.ytcfg.get('LOGGED_IN'));
 
   // --- Playback --------------------------------------------------------------
-  api.play = function (videoId, playlistId) {
+  // Each play request cancels the checks of the one before, so a quick second click never
+  // gets overridden by the first request's fallback.
+  let playTimers = [];
+  const clearPlayTimers = () => { playTimers.forEach(clearTimeout); playTimers = []; };
+
+  api.play = function (videoId, playlistId, shuffle) {
+    clearPlayTimers();
     const endpoint = videoId
       ? { watchEndpoint: playlistId ? { videoId, playlistId } : { videoId } }
       : { watchPlaylistEndpoint: { playlistId } };
     const url = '/watch?' + [videoId && 'v=' + videoId, playlistId && 'list=' + playlistId].filter(Boolean).join('&');
+    const currentId = () => { const p = player(); return p && p.getVideoData ? p.getVideoData().video_id : ''; };
+    const before = currentId();
+    const took = () => {
+      const p = player();
+      const current = currentId();
+      if (videoId) return current === videoId || location.search.includes(videoId);
+      // A playlist (or radio) started: the URL, the player's playlist, or a new song says so.
+      return location.search.includes(playlistId)
+        || (p && p.getPlaylistId && p.getPlaylistId() === playlistId)
+        || (!!current && current !== before);
+    };
     // In-page navigation keeps the player alive; fall back to a normal page load if it didn't take.
     try { document.querySelector('ytmusic-app').handleNavigationEndpoint(endpoint); } catch (e) {}
-    setTimeout(() => {
-      const p = player();
-      const current = p && p.getVideoData ? p.getVideoData().video_id : '';
-      const took = videoId ? current === videoId || location.search.includes(videoId)
-                           : location.search.includes(playlistId);
-      if (!took) location.href = url;
-    }, 2500);
+    playTimers.push(setTimeout(() => { if (!took()) location.href = url; }, 2500));
+
+    // Shuffle once the new queue is actually playing, not after a fixed delay.
+    if (shuffle) {
+      let tries = 0;
+      const tryShuffle = () => {
+        const p = player();
+        const playing = p && p.getPlayerState && p.getPlayerState() === 1;
+        if (took() && playing) { api.shuffle(); return; }
+        if (++tries < 60) playTimers.push(setTimeout(tryShuffle, 250)); // up to 15 s
+      };
+      playTimers.push(setTimeout(tryShuffle, 250));
+    }
   };
 
   api.shuffle = () => click('ytmusic-player-bar .shuffle, .shuffle.ytmusic-player-bar');

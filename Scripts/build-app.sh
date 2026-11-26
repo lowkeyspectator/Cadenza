@@ -4,7 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-VERSION="2.3.0"
+VERSION="2.3.1"
 APP="build/Cadenza.app"
 
 # Universal binary: build each architecture, then merge. Both builds write to the same output

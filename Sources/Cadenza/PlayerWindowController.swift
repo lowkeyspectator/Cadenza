@@ -128,6 +128,7 @@ final class PlayerWindowController: NSWindowController, WKNavigationDelegate, WK
         model.showMainWindow = { [weak self] in self?.showMain() }
         applyMenuBarPreference()
         observers.append(model.$webMode.sink { [weak self] on in self?.applyWebMode(on) })
+        model.start()
         webView.load(URLRequest(url: Self.home))
     }
 
@@ -148,7 +149,7 @@ final class PlayerWindowController: NSWindowController, WKNavigationDelegate, WK
         }
         if !on { signingIn = false }
         // Leaving a Google page behind would leave the engine without a player.
-        if !on, let host = webView.url?.host, !host.hasSuffix("music.youtube.com") { reloadPlayer() }
+        if !on, let host = webView.url?.host, !Self.isPlayerHost(host) { reloadPlayer() }
     }
 
     // MARK: Engine
@@ -179,8 +180,7 @@ final class PlayerWindowController: NSWindowController, WKNavigationDelegate, WK
         let probe = "!!(window.__cadenza && window.__cadenza.browse && window.ytcfg && window.ytcfg.get('INNERTUBE_CONTEXT'))"
         for _ in 0..<40 { // up to ~10 s
             if Task.isCancelled { return false }
-            if !model.webMode, !webView.isLoading, let host = webView.url?.host,
-               !host.hasSuffix("music.youtube.com") {
+            if !model.webMode, !webView.isLoading, let host = webView.url?.host, !Self.isPlayerHost(host) {
                 reloadPlayer() // stranded on a sign-in page with the web player hidden
             }
             if (try? await webView.evaluateJavaScript(probe)) as? Bool == true { return true }
@@ -206,10 +206,21 @@ final class PlayerWindowController: NSWindowController, WKNavigationDelegate, WK
             guard let self, event.window === self.window || event.window === self.miniPanel,
                   !self.model.webMode,
                   event.keyCode == 49, event.modifierFlags.intersection([.command, .option, .control]).isEmpty,
-                  !(self.window?.firstResponder is NSText) else { return event }
+                  self.spacePlays(in: event.window) else { return event }
             self.model.playPause()
             return nil
         } as Any)
+    }
+
+    /// Space belongs to whatever has keyboard focus (a text field, a slider, or a button reached
+    /// with Tab under Full Keyboard Access); it plays/pauses only when nothing has.
+    private func spacePlays(in window: NSWindow?) -> Bool {
+        guard let responder = window?.firstResponder else { return true }
+        if responder is NSText || responder is NSControl { return false }
+        if responder === window || responder === nativeHost || responder === window?.contentView
+            || responder === miniPanel?.contentView { return true }
+        // Some other view holds focus: under Full Keyboard Access that is a focused button.
+        return !NSApp.isFullKeyboardAccessEnabled
     }
 
     /// Calls a function on the injected `window.__cadenza` bridge.
@@ -336,7 +347,8 @@ final class PlayerWindowController: NSWindowController, WKNavigationDelegate, WK
     // MARK: Bridge
 
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
-        guard message.frameInfo.isMainFrame, let body = message.body as? [String: Any] else { return }
+        guard message.frameInfo.isMainFrame, Self.isPlayerHost(message.frameInfo.securityOrigin.host),
+              let body = message.body as? [String: Any] else { return }
         switch body["type"] as? String {
         case "time":
             if let id = body["id"] as? String, let t = body["t"] as? Double { model.playerTime(id: id, t) }
@@ -354,10 +366,32 @@ final class PlayerWindowController: NSWindowController, WKNavigationDelegate, WK
     /// Hosts that stay inside the app: the player itself and Google's sign-in.
     private func isInApp(_ url: URL) -> Bool {
         guard let host = url.host?.lowercased() else { return true } // about:blank, blob:, data:
-        if host == "youtube.com" || host.hasSuffix(".youtube.com") { return true }
-        let labels = host.split(separator: ".")
-        return labels.contains("google") || host.hasSuffix(".googleusercontent.com")
-            || host.hasSuffix(".gstatic.com") || host.hasSuffix(".youtube-nocookie.com")
+        func within(_ domain: String) -> Bool { host == domain || host.hasSuffix("." + domain) }
+        if within("youtube.com") || within("youtube-nocookie.com")
+            || within("googleusercontent.com") || within("gstatic.com") { return true }
+        // Google's own domains: google.com, google.de, google.co.uk, google.com.au and their
+        // subdomains. Not merely any host with "google" somewhere in it.
+        return host.range(of: #"(^|\.)google\.(com|[a-z]{2}|co\.[a-z]{2}|com\.[a-z]{2})$"#,
+                          options: .regularExpression) != nil
+    }
+
+    private static func isPlayerHost(_ host: String?) -> Bool { host?.lowercased() == "music.youtube.com" }
+
+    // Loading the player failed (offline, DNS, TLS…). Without this the interface would wait forever.
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        loadFailed(error)
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        loadFailed(error)
+    }
+
+    private func loadFailed(_ error: Error) {
+        let ns = error as NSError
+        // A navigation replaced by another one, or a page that turned into a download: not failures.
+        if ns.domain == NSURLErrorDomain && ns.code == NSURLErrorCancelled { return }
+        if ns.domain == "WebKitErrorDomain" && ns.code == 102 { return }
+        model.playerFailed(ns.localizedDescription)
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,

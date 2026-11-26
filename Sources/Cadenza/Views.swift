@@ -8,6 +8,11 @@ enum Theme {
     static let accent = Color(red: 0.98, green: 0.18, blue: 0.33)
 }
 
+/// The given animation, or none when *Reduce motion* is on in System Settings ▸ Accessibility.
+func motion(_ animation: Animation) -> Animation? {
+    NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : animation
+}
+
 // MARK: Root
 
 struct RootView: View {
@@ -43,7 +48,7 @@ struct RootView: View {
                         .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
-            .animation(.spring(response: 0.32, dampingFraction: 0.9), value: showSidebar)
+            .animation(motion(.spring(response: 0.32, dampingFraction: 0.9)), value: showSidebar)
         }
         // Opaque backing: the web player sits underneath this view, and without it the player
         // shows through the hairline dividers between the columns.
@@ -108,7 +113,7 @@ struct SidebarView: View {
             Spacer().frame(height: 44) // traffic lights
 
             HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary).accessibilityHidden(true)
                 TextField("Search", text: $model.searchText)
                     .textFieldStyle(.plain)
                     .onSubmit { model.submitSearch() }
@@ -151,6 +156,7 @@ struct SidebarView: View {
                 }
                 Button { model.webMode = true } label: { Image(systemName: "globe") }
                     .buttonStyle(.borderless)
+                    .accessibilityLabel("Show Web Player")
                     .help("Open the YouTube Music web player (account and playback settings)")
             }
             .padding(.horizontal, 14).padding(.vertical, 10)
@@ -195,17 +201,20 @@ struct TopBar: View {
         HStack(spacing: 4) {
             if !sidebarShown { Spacer().frame(width: 62) } // traffic lights
             Button { model.toggleSidebar() } label: { Image(systemName: "sidebar.left") }
+                .accessibilityLabel(sidebarShown ? "Hide Sidebar" : "Show Sidebar")
                 .disabled(!canShowSidebar)
                 .help("Show or hide the sidebar")
             Button { model.goBack() } label: { Image(systemName: "chevron.left") }
+                .accessibilityLabel("Back").help("Back")
                 .disabled(model.backStack.isEmpty)
             Button { model.goForward() } label: { Image(systemName: "chevron.right") }
+                .accessibilityLabel("Forward").help("Forward")
                 .disabled(model.forwardStack.isEmpty)
             Spacer()
             if !sidebarShown {
                 // The sidebar holds the search field, so offer one here while it is hidden.
                 HStack(spacing: 6) {
-                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary).accessibilityHidden(true)
                     TextField("Search", text: $model.searchText)
                         .textFieldStyle(.plain).font(.system(size: 13))
                         .onSubmit { model.submitSearch() }
@@ -358,9 +367,7 @@ struct SectionView: View {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 160, maximum: 200), spacing: 18, alignment: .top)],
                           alignment: .leading, spacing: 22) {
                     ForEach(section.items) { CardView(model: model, item: $0) }
-                    if section.continuation != nil {
-                        ProgressView().controlSize(.small).onAppear { model.loadMore(section) }
-                    }
+                    moreFooter
                 }
                 .padding(.horizontal, 28)
             default:
@@ -368,11 +375,22 @@ struct SectionView: View {
                     ForEach(Array(section.items.enumerated()), id: \.element.id) { index, item in
                         TrackRow(model: model, item: item, header: header, number: index + 1)
                     }
-                    if section.continuation != nil {
-                        ProgressView().controlSize(.small).padding(12).onAppear { model.loadMore(section) }
-                    }
+                    moreFooter.padding(12)
                 }
                 .padding(.horizontal, 20)
+            }
+        }
+    }
+
+    /// End of a long list: loads the next batch when scrolled into view, or offers a retry.
+    @ViewBuilder private var moreFooter: some View {
+        if let token = section.continuation {
+            if model.failedMore.contains(token) {
+                Button("Couldn’t load more. Try Again") { model.loadMore(section) }
+                    .buttonStyle(.link).font(.system(size: 12))
+            } else {
+                ProgressView().controlSize(.small).onAppear { model.loadMore(section) }
+                    .accessibilityLabel("Loading more")
             }
         }
     }
@@ -399,6 +417,7 @@ struct CardView: View {
                                         .background(.ultraThinMaterial, in: Circle())
                                 }
                                 .buttonStyle(.plain).padding(8)
+                                .accessibilityLabel("Play \(item.title)")
                                 .transition(.opacity.combined(with: .scale(scale: 0.85)))
                             }
                         }
@@ -414,7 +433,7 @@ struct CardView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(PressableStyle())
-            .animation(.easeOut(duration: 0.15), value: hovering)
+            .animation(motion(.easeOut(duration: 0.15)), value: hovering)
             .contextMenu { ItemMenu(model: model, item: item) }
         }
     }
@@ -443,6 +462,7 @@ struct TrackRow: View {
                     Spacer(minLength: 12)
                     if let duration = item.duration {
                         Text(duration).font(.system(size: 12).monospacedDigit()).foregroundStyle(.secondary)
+                            .accessibilityLabel("Duration \(duration)")
                     } else if item.videoId == nil && item.browseId != nil {
                         Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(.tertiary)
                     }
@@ -453,6 +473,8 @@ struct TrackRow: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(PressableStyle(scale: 1))
+            .accessibilityAddTraits(current ? .isSelected : [])
+            .accessibilityHint(item.videoId != nil ? "Plays this song" : "Opens this item")
             .contextMenu { ItemMenu(model: model, item: item) }
         }
     }
@@ -513,7 +535,7 @@ struct PressableStyle: ButtonStyle {
         configuration.label
             .opacity(configuration.isPressed ? 0.75 : 1)
             .scaleEffect(configuration.isPressed ? scale : 1)
-            .animation(.spring(response: 0.25, dampingFraction: 0.7), value: configuration.isPressed)
+            .animation(motion(.spring(response: 0.25, dampingFraction: 0.7)), value: configuration.isPressed)
     }
 }
 
@@ -529,12 +551,15 @@ struct PlayerBar: View {
             // Transport
             HStack(spacing: 18) {
                 Button { model.previous() } label: { Image(systemName: "backward.fill") }
+                    .accessibilityLabel("Previous")
                 Button { model.playPause() } label: {
                     Image(systemName: now.playing ? "pause.fill" : "play.fill")
                         .font(.system(size: 22)).frame(width: 26)
                         .contentTransition(.symbolEffect(.replace))
                 }
+                .accessibilityLabel(now.playing ? "Pause" : "Play")
                 Button { model.next() } label: { Image(systemName: "forward.fill") }
+                    .accessibilityLabel("Next")
             }
             .font(.system(size: 15))
             .buttonStyle(PressableStyle(scale: 0.88))
@@ -544,7 +569,7 @@ struct PlayerBar: View {
 
             // Now playing
             HStack(spacing: 10) {
-                Artwork(url: now.artURL, size: 44, corner: 5)
+                Artwork(url: now.artURL, size: 44, corner: 5).accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
                         Text(title(now)).font(.system(size: 13, weight: .medium)).lineLimit(1)
@@ -577,11 +602,13 @@ struct PlayerBar: View {
                 }
                 .buttonStyle(PressableStyle(scale: 0.88)).font(.system(size: 15))
                 .help("Lyrics")
+                .accessibilityLabel(model.showLyrics ? "Hide Lyrics" : "Show Lyrics")
                 Button { model.toggleMiniPlayer?() } label: {
                     Image(systemName: "arrow.down.right.and.arrow.up.left")
                 }
                 .buttonStyle(PressableStyle(scale: 0.88)).font(.system(size: 13))
                 .help("Switch to MiniPlayer")
+                .accessibilityLabel("Switch to MiniPlayer")
             }
         }
         .padding(.horizontal, compact ? 12 : 20)
@@ -620,6 +647,8 @@ struct Scrubber: View {
             }
             .controlSize(.mini)
             .disabled(!enabled)
+            .accessibilityLabel("Playback position")
+            .accessibilityValue("\(Self.stamp(clock.time)) of \(Self.stamp(duration))")
             Text(Self.stamp(duration)).frame(width: 34, alignment: .leading)
         }
         .font(.system(size: 10).monospacedDigit()).foregroundStyle(.secondary)
@@ -640,8 +669,11 @@ struct VolumeSlider: View {
             Image(systemName: volume.level < 1 ? "speaker.slash.fill" : "speaker.wave.2.fill",
                   variableValue: volume.level / 100)
                 .font(.system(size: 11)).foregroundStyle(.secondary).frame(width: 16)
+                .accessibilityHidden(true)
             Slider(value: Binding(get: { volume.level }, set: { model.setVolume($0) }), in: 0...100)
                 .controlSize(.mini).frame(width: 84)
+                .accessibilityLabel("Volume")
+                .accessibilityValue("\(Int(volume.level)) percent")
         }
     }
 }

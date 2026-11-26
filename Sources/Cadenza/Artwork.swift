@@ -12,6 +12,8 @@ final class ImageStore: @unchecked Sendable {
 
     private init() {
         memory.countLimit = 600
+        // Decoded bitmaps are large (a 900 px MiniPlayer cover is ~3 MB), so cap by bytes too.
+        memory.totalCostLimit = 160 << 20
         let config = URLSessionConfiguration.default
         config.urlCache = URLCache(memoryCapacity: 16 << 20, diskCapacity: 256 << 20)
         config.requestCachePolicy = .returnCacheDataElseLoad // artwork URLs are immutable
@@ -34,7 +36,7 @@ final class ImageStore: @unchecked Sendable {
         ]
         guard let source = CGImageSourceCreateWithData(data as CFData, nil),
               let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
-        memory.setObject(image, forKey: key(url, pixels))
+        memory.setObject(image, forKey: key(url, pixels), cost: image.bytesPerRow * image.height)
         return image
     }
 }
@@ -100,6 +102,7 @@ struct Artwork: View {
         .frame(width: size, height: size)
         .clipShape(shape)
         .overlay(shape.strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5))
+        .accessibilityHidden(true) // decorative: the title next to it is what gets read
     }
 }
 
@@ -113,6 +116,7 @@ struct FillArtwork: View {
             Image(systemName: "music.note").font(.system(size: 34)).foregroundStyle(.white.opacity(0.3))
             RemoteImage(url: url, pixels: 900)
         }
+        .accessibilityHidden(true)
     }
 }
 
