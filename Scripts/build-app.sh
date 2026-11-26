@@ -6,12 +6,21 @@ cd "$(dirname "$0")/.."
 VERSION="2.3.0"
 APP="build/Cadenza.app"
 
-swift build -c release
-BIN="$(swift build -c release --show-bin-path)/Cadenza"
+# Universal binary: build each architecture, then merge. Both builds write to the same output
+# folder, so copy each binary out before building the next.
+SLICES="build/slices"
+rm -rf "$SLICES"
+mkdir -p "$SLICES"
+for ARCH in arm64 x86_64; do
+    TRIPLE="$ARCH-apple-macosx14.0"
+    swift build -c release --triple "$TRIPLE"
+    cp "$(swift build -c release --triple "$TRIPLE" --show-bin-path)/Cadenza" "$SLICES/Cadenza-$ARCH"
+done
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$BIN" "$APP/Contents/MacOS/Cadenza"
+lipo -create "$SLICES"/Cadenza-* -output "$APP/Contents/MacOS/Cadenza"
+rm -rf "$SLICES"
 
 ICONSET="build/AppIcon.iconset"
 rm -rf "$ICONSET"

@@ -82,7 +82,20 @@ your other sign-in methods instead. If a passkey prompt still appears, choose **
 
 To uninstall, quit Cadenza and delete `/Applications/Cadenza.app`.
 
-## Build from source
+## Install
+
+Download the latest `Cadenza-<version>.dmg` from
+[Releases](https://github.com/lowkeyspectator/Cadenza/releases), open it and drag Cadenza to
+Applications. It runs on Apple Silicon and Intel Macs with macOS 14 or later.
+
+The app is ad-hoc signed, not notarized by Apple, so macOS blocks the first launch. Open it once, then go
+to **System Settings ▸ Privacy & Security** and click **Open Anyway**. Alternatively run:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Cadenza.app
+```
+
+## Build
 
 Requires macOS 14+ and the Swift toolchain (Xcode or just the Command Line Tools).
 
@@ -94,7 +107,13 @@ Requires macOS 14+ and the Swift toolchain (Xcode or just the Command Line Tools
 open build/Cadenza.app
 ```
 
-The app is ad-hoc signed for local use. Copy `build/Cadenza.app` to `/Applications` if you want to keep it.
+To package a DMG (written to `build/Cadenza-<version>.dmg`):
+
+```bash
+./Scripts/make-dmg.sh
+```
+
+Both produce a universal (Apple Silicon and Intel) app, ad-hoc signed for local use.
 
 ## Limits
 
@@ -117,7 +136,8 @@ The app is ad-hoc signed for local use. Copy `build/Cadenza.app` to `/Applicatio
 | `Sources/Cadenza/BridgeScript.swift` | JavaScript injected into the web player: data requests, playback, audio only |
 | `Sources/Cadenza/PlayerWindowController.swift` | Window, hidden web player, sign-in handling |
 | `Sources/Cadenza/AppDelegate.swift` | Menus and actions |
-| `Scripts/build-app.sh` | Builds and bundles `Cadenza.app` |
+| `Scripts/build-app.sh` | Builds and bundles a universal `Cadenza.app` |
+| `Scripts/make-dmg.sh` | Packages the app as a DMG for releases |
 
 The bridge relies on YouTube Music's page structure and its internal JSON API, neither of which is a
 public interface. If Google changes them, pages may come back empty or playback controls may stop working
