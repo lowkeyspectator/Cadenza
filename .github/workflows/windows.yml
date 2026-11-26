@@ -53,7 +53,12 @@ jobs:
             Replace('$IDENTITY_NAME$', $env:IDENTITY_NAME).Replace('$PUBLISHER$', $env:PUBLISHER).
             Replace('$PUBLISHER_DISPLAY_NAME$', $env:PUBLISHER_DISPLAY_NAME).Replace('$VERSION$', "$version.0") |
             Set-Content "$layout/AppxManifest.xml" -Encoding utf8
-          $sdk = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\10.*\x64" -Directory | Sort-Object Name -Descending | Select-Object -First 1
+          # Newest Windows SDK that actually has the packaging tools.
+          $tool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter makeappx.exe |
+            Where-Object { $_.DirectoryName -like '*\x64' } |
+            Sort-Object { [version]($_.Directory.Parent.Name -replace '[^0-9.]', '') } -Descending | Select-Object -First 1
+          $sdk = $tool.Directory
+          Write-Host "Using $($sdk.FullName)"
           & "$($sdk.FullName)\makeappx.exe" pack /d $layout /p "Cadenza-$version-x64.msix" /o
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
