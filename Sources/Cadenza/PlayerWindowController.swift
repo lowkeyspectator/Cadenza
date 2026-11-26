@@ -51,6 +51,29 @@ final class PlayerWindowController: NSWindowController, WKNavigationDelegate, WK
         config.userContentController.addUserScript(
             WKUserScript(source: noPasskeys, injectionTime: .atDocumentStart, forMainFrameOnly: false))
 
+        // macOS Now Playing (Control Center, the menu bar, media keys) shows ±15 s buttons instead of
+        // previous/next whenever the page registers seek-by-interval handlers, which the web player
+        // does. Refuse those, and make sure previous/next always have a handler.
+        let trackButtons = """
+            (function () {
+              if (location.hostname !== 'music.youtube.com' || !window.MediaSession) return;
+              const original = MediaSession.prototype.setActionHandler;
+              const press = (sel) => () => { const el = document.querySelector(sel); if (el) el.click(); };
+              const fallback = { nexttrack: press('.next-button'), previoustrack: press('.previous-button') };
+              MediaSession.prototype.setActionHandler = function (action, handler) {
+                if (action === 'seekbackward' || action === 'seekforward') return original.call(this, action, null);
+                if (fallback[action] && !handler) handler = fallback[action];
+                return original.call(this, action, handler);
+              };
+              window.__cadenzaTrackButtons = true;
+              for (const action of Object.keys(fallback)) {
+                try { original.call(navigator.mediaSession, action, fallback[action]); } catch (e) {}
+              }
+            })();
+            """
+        config.userContentController.addUserScript(
+            WKUserScript(source: trackButtons, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+
         webView = WKWebView(frame: .zero, configuration: config)
         webView.customUserAgent = Self.userAgent
         if #available(macOS 13.3, *) { webView.isInspectable = true }
@@ -227,18 +250,21 @@ final class PlayerWindowController: NSWindowController, WKNavigationDelegate, WK
             panel.isMovableByWindowBackground = true
             panel.isReleasedWhenClosed = false
             panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-            panel.minSize = NSSize(width: 280, height: 88)
-            panel.maxSize = NSSize(width: 640, height: 760)
-            panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
-            panel.standardWindowButton(.zoomButton)?.isHidden = true
+            panel.minSize = NSSize(width: 130, height: 130)
+            panel.maxSize = NSSize(width: 700, height: 900)
+            // The artwork runs edge to edge; the expand button on it replaces the traffic lights.
+            for button in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+                panel.standardWindowButton(button)?.isHidden = true
+            }
+            panel.backgroundColor = .black
             panel.contentView = NSHostingView(rootView: MiniPlayerView(model: model))
             panel.setContentSize(saved.size)
             panel.delegate = self
             // Start in the top-right corner unless the user has placed it before.
-            if !panel.setFrameUsingName("MiniPlayer"), let screen = (window?.screen ?? NSScreen.main)?.visibleFrame {
+            if !panel.setFrameUsingName("MiniPlayer.v2"), let screen = (window?.screen ?? NSScreen.main)?.visibleFrame {
                 panel.setFrameTopLeftPoint(NSPoint(x: screen.maxX - saved.size.width - 24, y: screen.maxY - 24))
             }
-            panel.setFrameAutosaveName("MiniPlayer")
+            panel.setFrameAutosaveName("MiniPlayer.v2")
             miniPanel = panel
         }
         miniPanel?.alphaValue = 0

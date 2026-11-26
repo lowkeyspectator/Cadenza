@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-VERSION="2.2.0"
+VERSION="2.3.0"
 APP="build/Cadenza.app"
 
 swift build -c release

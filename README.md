@@ -16,9 +16,12 @@ and it does not block ads.
 - **Player bar** with transport controls, scrubber, volume, and a badge showing the audio stream actually
   playing (for example "Opus 160 kbps").
 - **MiniPlayer** (`⇧⌘M`, or the button at the right of the player bar). Collapses the app into a small
-  floating window that stays above other apps; the expand button, closing it, or `⇧⌘M` again brings the
-  full window back. It can be resized freely or set to Small, Medium or Large under *Window ▸ MiniPlayer
-  Size*; the layout changes from a slim strip to large artwork as it grows.
+  floating window that stays above other apps: the artwork fills it and the controls sit on top. The
+  expand button on the artwork, or `⇧⌘M` again, brings the full window back. Resize it freely or pick
+  Small, Medium or Large under *Window ▸ MiniPlayer Size*: Small is artwork and controls only, larger
+  sizes add the title and a scrubber, and a tall window puts the controls below the artwork.
+- **Previous/next in Control Center** and the menu bar Now Playing widget, instead of the web player's
+  15-second skip buttons.
 - **Menu bar player.** A music-note icon in the menu bar opens a popover with the current track, transport
   controls, scrubber and volume. Turn it off under *View ▸ Show Player in Menu Bar*.
 - **Dock menu** with Play/Pause, Next and Previous.

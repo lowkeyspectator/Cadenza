@@ -75,7 +75,7 @@ final class RemoteImageView: NSView {
     }
 }
 
-private struct RemoteImage: NSViewRepresentable {
+struct RemoteImage: NSViewRepresentable {
     let url: URL?
     let pixels: Int
 
@@ -100,6 +100,19 @@ struct Artwork: View {
         .frame(width: size, height: size)
         .clipShape(shape)
         .overlay(shape.strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5))
+    }
+}
+
+/// Artwork that fills whatever space it is given, cropping to fit.
+struct FillArtwork: View {
+    let url: URL?
+
+    var body: some View {
+        ZStack {
+            Color(white: 0.16)
+            Image(systemName: "music.note").font(.system(size: 34)).foregroundStyle(.white.opacity(0.3))
+            RemoteImage(url: url, pixels: 900)
+        }
     }
 }
 

@@ -38,68 +38,96 @@ private struct TrackText: View {
     }
 }
 
-/// The MiniPlayer window. Its layout follows its size: a slim strip, a strip with a scrubber,
-/// or large artwork with the controls underneath.
+/// The MiniPlayer window: the artwork fills the window and the controls sit on top of it.
+/// More appears as it grows: transport only, then title and scrubber, then (in a tall window)
+/// artwork above a separate control area.
 struct MiniPlayerView: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
         GeometryReader { geo in
-            let now = model.now
             let size = geo.size
+            let tall = size.height >= 380 && size.height > size.width * 1.25
             Group {
-                if size.height >= 300 {
-                    // Large: artwork on top.
-                    let art = max(80, min(size.width - 32, size.height - 168))
-                    VStack(spacing: 10) {
-                        Artwork(url: now.artURL, size: art, corner: 10)
-                            .shadow(color: .black.opacity(0.3), radius: 12, y: 5)
-                            .padding(.top, 34)
-                        Spacer(minLength: 0)
-                        HStack {
-                            TrackText(now: now)
-                            Spacer(minLength: 8)
-                            expandButton
-                        }
-                        Scrubber(model: model, clock: model.clock, duration: now.duration,
-                                 enabled: !(now.isEmpty || now.ad))
-                        Transport(model: model, size: 17).padding(.bottom, 14)
-                    }
-                    .padding(.horizontal, 16)
-                } else {
-                    // Strip: artwork beside the controls; the scrubber appears when there is room.
-                    VStack(spacing: 6) {
-                        HStack(spacing: 10) {
-                            Artwork(url: now.artURL, size: 48, corner: 6)
-                            TrackText(now: now)
-                            Spacer(minLength: 6)
-                            Transport(model: model, size: 13)
-                            expandButton
-                        }
-                        if size.height >= 118 {
-                            Scrubber(model: model, clock: model.clock, duration: now.duration,
-                                     enabled: !(now.isEmpty || now.ad))
-                        }
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.top, 26) // title bar
-                    .frame(maxHeight: .infinity)
-                }
+                if tall { tallLayout(size) } else { overlayLayout(size) }
             }
             .frame(width: size.width, height: size.height)
-            .animation(.spring(response: 0.3, dampingFraction: 0.9), value: size.height >= 300)
         }
-        .background(VisualEffect(material: .hudWindow))
+        .environment(\.colorScheme, .dark)
         .tint(Theme.accent)
         .ignoresSafeArea()
+    }
+
+    // Artwork edge to edge, controls over a dark gradient.
+    private func overlayLayout(_ size: CGSize) -> some View {
+        let now = model.now
+        let short = min(size.width, size.height)
+        let showText = size.height >= 200 && size.width >= 200
+        let showScrubber = size.height >= 210 && size.width >= 200
+        let controlSize = max(13, min(22, short * 0.085))
+        return ZStack {
+            FillArtwork(url: now.artURL)
+            LinearGradient(
+                colors: [.black.opacity(0.0), .black.opacity(0.35), .black.opacity(0.8)],
+                startPoint: .top, endPoint: .bottom)
+            VStack(spacing: 8) {
+                HStack {
+                    Spacer()
+                    expandButton.padding(8)
+                }
+                Spacer(minLength: 0)
+                if showText {
+                    TrackText(now: now, alignment: .center)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 12)
+                }
+                if showScrubber {
+                    Scrubber(model: model, clock: model.clock, duration: now.duration,
+                             enabled: !(now.isEmpty || now.ad))
+                        .padding(.horizontal, 12)
+                }
+                Transport(model: model, size: controlSize)
+                    .shadow(color: .black.opacity(0.4), radius: 4)
+                    .padding(.bottom, max(10, short * 0.07))
+            }
+            .foregroundStyle(.white)
+        }
+    }
+
+    // Tall window: square artwork on top, controls below on a blurred backdrop.
+    private func tallLayout(_ size: CGSize) -> some View {
+        let now = model.now
+        let art = max(120, min(size.width - 32, size.height - 170))
+        return ZStack {
+            FillArtwork(url: now.artURL).blur(radius: 40).opacity(0.55)
+            Color.black.opacity(0.45)
+            VStack(spacing: 10) {
+                ZStack(alignment: .topTrailing) {
+                    Artwork(url: now.artURL, size: art, corner: 10)
+                        .shadow(color: .black.opacity(0.35), radius: 12, y: 5)
+                    expandButton.padding(8)
+                }
+                .padding(.top, 16)
+                Spacer(minLength: 0)
+                TrackText(now: now).frame(maxWidth: .infinity, alignment: .leading)
+                Scrubber(model: model, clock: model.clock, duration: now.duration,
+                         enabled: !(now.isEmpty || now.ad))
+                Transport(model: model, size: 17).padding(.bottom, 14)
+            }
+            .padding(.horizontal, 16)
+            .foregroundStyle(.white)
+        }
     }
 
     private var expandButton: some View {
         Button { model.showMainWindow?() } label: {
             Image(systemName: "arrow.up.left.and.arrow.down.right")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 24, height: 24)
+                .background(.black.opacity(0.35), in: Circle())
         }
-        .buttonStyle(PressableStyle(scale: 0.88)).font(.system(size: 12))
-        .foregroundStyle(.secondary)
+        .buttonStyle(PressableStyle(scale: 0.88))
         .help("Return to the full window")
     }
 }
@@ -142,5 +170,7 @@ enum MiniPlayerSize: Int, CaseIterable {
     case small, medium, large
 
     var title: String { ["Small", "Medium", "Large"][rawValue] }
-    var size: NSSize { [NSSize(width: 340, height: 92), NSSize(width: 360, height: 132), NSSize(width: 320, height: 470)][rawValue] }
+    var size: NSSize {
+        [NSSize(width: 180, height: 180), NSSize(width: 280, height: 280), NSSize(width: 320, height: 470)][rawValue]
+    }
 }
