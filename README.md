@@ -69,8 +69,8 @@ your other sign-in methods instead. If a passkey prompt still appears, choose **
 
 **Requirements:** macOS 14 Sonoma or later, on Apple Silicon or Intel.
 
-1. Download `Cadenza.zip` from the [latest release](https://github.com/lowkeyspectator/Cadenza/releases/latest).
-2. Unzip it and drag **Cadenza.app** into your **Applications** folder.
+1. Download `Cadenza-<version>.dmg` from the [latest release](https://github.com/lowkeyspectator/Cadenza/releases/latest).
+2. Open it and drag **Cadenza** onto the **Applications** shortcut.
 3. Open it. The app isn't notarized by Apple, so the first launch is blocked with a message that macOS
    couldn't verify it. To allow it:
    - Open **System Settings → Privacy & Security**, scroll down to the message about Cadenza, click
@@ -81,19 +81,6 @@ your other sign-in methods instead. If a passkey prompt still appears, choose **
      ```
 
 To uninstall, quit Cadenza and delete `/Applications/Cadenza.app`.
-
-## Install
-
-Download the latest `Cadenza-<version>.dmg` from
-[Releases](https://github.com/lowkeyspectator/Cadenza/releases), open it and drag Cadenza to
-Applications. It runs on Apple Silicon and Intel Macs with macOS 14 or later.
-
-The app is ad-hoc signed, not notarized by Apple, so macOS blocks the first launch. Open it once, then go
-to **System Settings ▸ Privacy & Security** and click **Open Anyway**. Alternatively run:
-
-```bash
-xattr -dr com.apple.quarantine /Applications/Cadenza.app
-```
 
 ## Build
 
