@@ -1,0 +1,49 @@
+name: Windows
+
+on:
+  push:
+    paths:
+      - "Windows/**"
+      - "Sources/Cadenza/BridgeScript.swift"
+      - ".github/workflows/windows.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+
+      - name: Build
+        run: >
+          dotnet publish Windows/Cadenza.Windows.csproj -c Release -r win-x64 --self-contained true
+          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o out
+
+      # Launches the app against the real YouTube Music (signed out), loads Home, plays two
+      # songs in a row, opens lyrics and search, and saves a log and screenshots.
+      - name: Smoke test
+        shell: pwsh
+        run: |
+          $env:CADENZA_SELFTEST = "$PWD\selftest.log"
+          $p = Start-Process -FilePath out\Cadenza.exe -PassThru
+          if (-not $p.WaitForExit(240000)) { $p.Kill(); Write-Host "Timed out" }
+          if (Test-Path selftest.log) { Get-Content selftest.log } else { Write-Host "No log written" }
+          if (Test-Path "$env:LOCALAPPDATA\Cadenza\errors.log") { Get-Content "$env:LOCALAPPDATA\Cadenza\errors.log" }
+          if (Select-String -Path selftest.log -Pattern "^\S+ FAIL" -Quiet) { exit 1 }
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: selftest
+          path: |
+            selftest*.log
+            selftest*.png
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Cadenza-windows-x64
+          path: out/

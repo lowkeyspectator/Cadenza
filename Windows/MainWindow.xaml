@@ -1,0 +1,584 @@
+<Window x:Class="Cadenza.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:Cadenza"
+        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+        Title="Cadenza" Width="1240" Height="800" MinWidth="560" MinHeight="440"
+        WindowStartupLocation="CenterScreen">
+
+    <Window.Resources>
+        <local:VisibleWhen x:Key="Visible" />
+        <local:Not x:Key="Not" />
+        <local:Clock x:Key="Clock" />
+        <local:Corner x:Key="Corner" />
+        <local:Artwork x:Key="Art" />
+        <FontFamily x:Key="Icons">Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
+        <SolidColorBrush x:Key="Accent" Color="#FA2E54" />
+        <SolidColorBrush x:Key="Hover" Color="#1A808080" />
+        <SolidColorBrush x:Key="Wash" Color="#12808080" />
+
+        <!-- A button with no chrome: a hover wash and a press dim. -->
+        <Style x:Key="Plain" TargetType="Button">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="6"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource Hover}" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Opacity" Value="0.7" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Bd" Property="Opacity" Value="0.35" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="Icon" TargetType="Button" BasedOn="{StaticResource Plain}">
+            <Setter Property="FontFamily" Value="{StaticResource Icons}" />
+            <Setter Property="FontSize" Value="15" />
+            <Setter Property="Width" Value="34" />
+            <Setter Property="Height" Value="34" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+        </Style>
+
+        <Style x:Key="AccentButton" TargetType="Button">
+            <Setter Property="Background" Value="{StaticResource Accent}" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="Padding" Value="20,8" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="6"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Opacity" Value="0.88" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Opacity" Value="0.7" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="Secondary" TargetType="TextBlock">
+            <Setter Property="Opacity" Value="0.62" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+        </Style>
+
+        <ContextMenu x:Key="ItemMenu" x:Shared="False">
+            <MenuItem Header="Play" Command="{Binding PlacementTarget.Tag.PlayItemCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                      CommandParameter="{Binding}" />
+            <MenuItem Header="Open" Command="{Binding PlacementTarget.Tag.OpenItemCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                      CommandParameter="{Binding}" />
+            <Separator />
+            <MenuItem Header="Copy Link" Command="{Binding PlacementTarget.Tag.CopyLinkCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                      CommandParameter="{Binding}" />
+        </ContextMenu>
+
+        <!-- Album, playlist or artist card. -->
+        <DataTemplate x:Key="Card" DataType="{x:Type local:Item}">
+            <Button Style="{StaticResource Plain}" Width="176" Margin="0,0,14,0" Padding="4"
+                    Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}"
+                    ContextMenu="{StaticResource ItemMenu}"
+                    Command="{Binding DataContext.ActivateCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                    CommandParameter="{Binding}"
+                    AutomationProperties.Name="{Binding Accessible}" ToolTip="{Binding Title}">
+                <StackPanel>
+                    <Grid Width="168" Height="168">
+                        <Rectangle Fill="{StaticResource Wash}"
+                                   RadiusX="{Binding IsRound, Converter={StaticResource Corner}, ConverterParameter=168}"
+                                   RadiusY="{Binding IsRound, Converter={StaticResource Corner}, ConverterParameter=168}" />
+                        <TextBlock Text="&#xE8D6;" FontFamily="{StaticResource Icons}" FontSize="40" Opacity="0.25"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        <Rectangle RadiusX="{Binding IsRound, Converter={StaticResource Corner}, ConverterParameter=168}"
+                                   RadiusY="{Binding IsRound, Converter={StaticResource Corner}, ConverterParameter=168}">
+                            <Rectangle.Fill>
+                                <ImageBrush ImageSource="{Binding Thumb, Converter={StaticResource Art}, ConverterParameter=336}"
+                                            Stretch="UniformToFill" />
+                            </Rectangle.Fill>
+                        </Rectangle>
+                    </Grid>
+                    <TextBlock Text="{Binding Title}" Margin="0,7,0,0" FontSize="13" TextWrapping="Wrap" MaxHeight="36"
+                               TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{Binding Subtitle}" Style="{StaticResource Secondary}" TextWrapping="Wrap" MaxHeight="34"
+                               Visibility="{Binding HasSubtitle, Converter={StaticResource Visible}}" />
+                </StackPanel>
+            </Button>
+        </DataTemplate>
+
+        <!-- Song or list row. -->
+        <DataTemplate x:Key="Row" DataType="{x:Type local:Item}">
+            <Button Style="{StaticResource Plain}" Padding="8,6" Margin="0,1"
+                    Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}"
+                    ContextMenu="{StaticResource ItemMenu}"
+                    Command="{Binding DataContext.ActivateCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                    CommandParameter="{Binding}"
+                    AutomationProperties.Name="{Binding Accessible}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="44" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Grid Width="40" Height="40" HorizontalAlignment="Left">
+                        <TextBlock Text="{Binding Number}" Style="{StaticResource Secondary}" FontSize="13"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   Visibility="{Binding HasArt, Converter={StaticResource Visible}, ConverterParameter=Invert}" />
+                        <Rectangle RadiusX="{Binding IsRound, Converter={StaticResource Corner}, ConverterParameter=40}"
+                                   RadiusY="{Binding IsRound, Converter={StaticResource Corner}, ConverterParameter=40}"
+                                   Visibility="{Binding HasArt, Converter={StaticResource Visible}}">
+                            <Rectangle.Fill>
+                                <ImageBrush ImageSource="{Binding Thumb, Converter={StaticResource Art}, ConverterParameter=80}"
+                                            Stretch="UniformToFill" />
+                            </Rectangle.Fill>
+                        </Rectangle>
+                        <Border Background="#80000000" CornerRadius="4"
+                                Visibility="{Binding IsCurrent, Converter={StaticResource Visible}}">
+                            <TextBlock Text="&#xE767;" FontFamily="{StaticResource Icons}" Foreground="{StaticResource Accent}"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                    </Grid>
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="8,0">
+                        <TextBlock Text="{Binding Title}" FontSize="13" TextTrimming="CharacterEllipsis">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsCurrent}" Value="True">
+                                            <Setter Property="Foreground" Value="{StaticResource Accent}" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                        <TextBlock Text="{Binding Subtitle}" Style="{StaticResource Secondary}"
+                                   Visibility="{Binding HasSubtitle, Converter={StaticResource Visible}}" />
+                    </StackPanel>
+                    <TextBlock Grid.Column="2" Text="{Binding Duration}" Style="{StaticResource Secondary}"
+                               VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="2" Text="&#xE76C;" FontFamily="{StaticResource Icons}" FontSize="11" Opacity="0.4"
+                               VerticalAlignment="Center"
+                               Visibility="{Binding OpensPage, Converter={StaticResource Visible}}" />
+                </Grid>
+            </Button>
+        </DataTemplate>
+
+        <DataTemplate x:Key="SectionTitle">
+            <TextBlock Text="{Binding Title}" FontSize="20" FontWeight="Bold" Margin="28,0,28,10"
+                       Visibility="{Binding ShowTitle, Converter={StaticResource Visible}}" />
+        </DataTemplate>
+
+        <DataTemplate x:Key="MoreButton">
+            <Button Style="{StaticResource Plain}" Padding="12,6" HorizontalAlignment="Left" Margin="0,8,0,0"
+                    Content="{Binding MoreText}" Foreground="{StaticResource Accent}"
+                    Command="{Binding DataContext.LoadMoreCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                    CommandParameter="{Binding}"
+                    Visibility="{Binding HasMore, Converter={StaticResource Visible}}" />
+        </DataTemplate>
+
+        <local:SectionTemplates x:Key="Sections">
+            <local:SectionTemplates.Carousel>
+                <DataTemplate>
+                    <StackPanel Margin="0,0,0,26">
+                        <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource SectionTitle}" />
+                        <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"
+                                      Padding="24,0,24,6" Tag="carousel">
+                            <ItemsControl ItemsSource="{Binding Items}" ItemTemplate="{StaticResource Card}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <VirtualizingStackPanel Orientation="Horizontal" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </StackPanel>
+                </DataTemplate>
+            </local:SectionTemplates.Carousel>
+            <local:SectionTemplates.Grid>
+                <DataTemplate>
+                    <StackPanel Margin="0,0,0,26">
+                        <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource SectionTitle}" />
+                        <ItemsControl ItemsSource="{Binding Items}" ItemTemplate="{StaticResource Card}" Margin="24,0">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <WrapPanel />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                        </ItemsControl>
+                        <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource MoreButton}" Margin="24,0" />
+                    </StackPanel>
+                </DataTemplate>
+            </local:SectionTemplates.Grid>
+            <local:SectionTemplates.List>
+                <DataTemplate>
+                    <StackPanel Margin="0,0,0,26">
+                        <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource SectionTitle}" />
+                        <ItemsControl ItemsSource="{Binding Items}" ItemTemplate="{StaticResource Row}" Margin="20,0" />
+                        <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource MoreButton}" Margin="20,0" />
+                    </StackPanel>
+                </DataTemplate>
+            </local:SectionTemplates.List>
+        </local:SectionTemplates>
+    </Window.Resources>
+
+    <Window.InputBindings>
+        <KeyBinding Key="P" Modifiers="Ctrl" Command="{Binding PlayPauseCommand}" />
+        <KeyBinding Key="Right" Modifiers="Ctrl" Command="{Binding NextCommand}" />
+        <KeyBinding Key="Left" Modifiers="Ctrl" Command="{Binding PreviousCommand}" />
+        <KeyBinding Key="L" Modifiers="Ctrl" Command="{Binding ToggleLyricsCommand}" />
+        <KeyBinding Key="Left" Modifiers="Alt" Command="{Binding BackCommand}" />
+        <KeyBinding Key="Right" Modifiers="Alt" Command="{Binding ForwardCommand}" />
+        <KeyBinding Key="F5" Command="{Binding ReloadCommand}" />
+        <KeyBinding Key="MediaPlayPause" Command="{Binding PlayPauseCommand}" />
+        <KeyBinding Key="MediaNextTrack" Command="{Binding NextCommand}" />
+        <KeyBinding Key="MediaPreviousTrack" Command="{Binding PreviousCommand}" />
+    </Window.InputBindings>
+
+    <Grid>
+        <!-- The YouTube Music web player: the audio engine. Shown only for sign-in and account settings. -->
+        <DockPanel x:Name="WebLayer" Visibility="{Binding WebMode, Converter={StaticResource Visible}}">
+            <Border DockPanel.Dock="Top" Padding="12,8" Background="{StaticResource Wash}">
+                <DockPanel>
+                    <Button Style="{StaticResource AccentButton}" Command="{Binding HideWebCommand}" Padding="14,6">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="&#xE72B;" FontFamily="{StaticResource Icons}" Margin="0,0,8,0" VerticalAlignment="Center" />
+                            <TextBlock Text="Back to Cadenza" />
+                        </StackPanel>
+                    </Button>
+                    <TextBlock Text="YouTube Music web player" Style="{StaticResource Secondary}" FontSize="13"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </DockPanel>
+            </Border>
+            <wv2:WebView2 x:Name="Web" />
+        </DockPanel>
+
+        <!-- The native interface. -->
+        <Grid x:Name="NativeLayer" Visibility="{Binding WebMode, Converter={StaticResource Visible}, ConverterParameter=Invert}">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <!-- Sidebar -->
+            <Border x:Name="Sidebar" Width="232" Background="{StaticResource Wash}">
+                <DockPanel>
+                    <Grid DockPanel.Dock="Top" Margin="12,14,12,10">
+                        <TextBox x:Name="SearchBox" Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+                                 Padding="30,6,8,6" KeyDown="SearchBox_KeyDown"
+                                 AutomationProperties.Name="Search" ToolTip="Search (Ctrl+F)" />
+                        <TextBlock Text="&#xE721;" FontFamily="{StaticResource Icons}" Opacity="0.55" Margin="10,0,0,0"
+                                   VerticalAlignment="Center" IsHitTestVisible="False" />
+                    </Grid>
+                    <Border DockPanel.Dock="Bottom" Padding="12,10" BorderThickness="0,1,0,0" BorderBrush="{StaticResource Hover}">
+                        <DockPanel>
+                            <Button DockPanel.Dock="Right" Style="{StaticResource Icon}" Content="&#xE774;"
+                                    Command="{Binding ShowWebCommand}" ToolTip="Open the YouTube Music web player (account and playback settings)"
+                                    AutomationProperties.Name="Show Web Player" />
+                            <Button Style="{StaticResource AccentButton}" Content="Sign In" Padding="14,5" HorizontalAlignment="Left"
+                                    Command="{Binding SignInCommand}"
+                                    Visibility="{Binding LoggedIn, Converter={StaticResource Visible}, ConverterParameter=Invert}" />
+                            <TextBlock Text="Signed in" Style="{StaticResource Secondary}" FontSize="13" VerticalAlignment="Center"
+                                       Visibility="{Binding LoggedIn, Converter={StaticResource Visible}}" />
+                        </DockPanel>
+                    </Border>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="10,0">
+                        <StackPanel>
+                            <ItemsControl ItemsSource="{Binding Library}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Button Style="{StaticResource Plain}" Padding="10,7" Margin="0,1"
+                                                Command="{Binding DataContext.OpenCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                CommandParameter="{Binding}" AutomationProperties.Name="{Binding Title}">
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="{Binding Glyph}" FontFamily="{StaticResource Icons}" Width="26"
+                                                           Foreground="{StaticResource Accent}" VerticalAlignment="Center" />
+                                                <TextBlock Text="{Binding Title}" FontSize="13" />
+                                            </StackPanel>
+                                            <Button.Style>
+                                                <Style TargetType="Button" BasedOn="{StaticResource Plain}">
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                                            <Setter Property="Background" Value="{StaticResource Hover}" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Button.Style>
+                                        </Button>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <TextBlock Text="Playlists" FontSize="11" FontWeight="SemiBold" Opacity="0.6" Margin="10,16,0,4"
+                                       Visibility="{Binding Playlists.Count, Converter={StaticResource Visible}}" />
+                            <ItemsControl ItemsSource="{Binding Playlists}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Button Style="{StaticResource Plain}" Padding="10,6" Margin="0,1"
+                                                Command="{Binding DataContext.ActivateCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                CommandParameter="{Binding}" AutomationProperties.Name="{Binding Title}">
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="&#xE8FD;" FontFamily="{StaticResource Icons}" Width="26"
+                                                           Foreground="{StaticResource Accent}" VerticalAlignment="Center" />
+                                                <TextBlock Text="{Binding Title}" FontSize="13" TextTrimming="CharacterEllipsis" MaxWidth="160" />
+                                            </StackPanel>
+                                        </Button>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
+
+            <!-- Main column -->
+            <DockPanel Grid.Column="1">
+                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="16,8">
+                    <Button Style="{StaticResource Icon}" Content="&#xE72B;" Command="{Binding BackCommand}"
+                            ToolTip="Back (Alt+Left)" AutomationProperties.Name="Back" />
+                    <Button Style="{StaticResource Icon}" Content="&#xE72A;" Command="{Binding ForwardCommand}"
+                            ToolTip="Forward (Alt+Right)" AutomationProperties.Name="Forward" />
+                </StackPanel>
+                <Grid>
+                    <ScrollViewer x:Name="MainScroll" VerticalScrollBarVisibility="Auto" Focusable="False"
+                                  Visibility="{Binding Page, Converter={StaticResource Visible}}">
+                        <StackPanel Margin="0,0,0,28">
+                            <!-- Header for albums, playlists and artists; a plain title otherwise. -->
+                            <ContentControl Content="{Binding Page.Header}" Focusable="False"
+                                            Visibility="{Binding Page.HasHeader, Converter={StaticResource Visible}}">
+                                <ContentControl.ContentTemplate>
+                                    <DataTemplate>
+                                        <Grid Margin="28,4,28,26">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Rectangle Width="210" Height="210"
+                                                       RadiusX="{Binding IsRound, Converter={StaticResource Corner}, ConverterParameter=210}"
+                                                       RadiusY="{Binding IsRound, Converter={StaticResource Corner}, ConverterParameter=210}">
+                                                <Rectangle.Fill>
+                                                    <ImageBrush ImageSource="{Binding Thumb, Converter={StaticResource Art}, ConverterParameter=420}"
+                                                                Stretch="UniformToFill" />
+                                                </Rectangle.Fill>
+                                            </Rectangle>
+                                            <StackPanel Grid.Column="1" Margin="24,0,0,0" VerticalAlignment="Bottom">
+                                                <TextBlock Text="{Binding Title}" FontSize="28" FontWeight="Bold" TextWrapping="Wrap" />
+                                                <TextBlock Text="{Binding Subtitle}" FontSize="19" Foreground="{StaticResource Accent}"
+                                                           TextWrapping="Wrap" Margin="0,4,0,0" />
+                                                <TextBlock Text="{Binding Second}" Style="{StaticResource Secondary}" TextWrapping="Wrap" Margin="0,4,0,0" />
+                                                <StackPanel Orientation="Horizontal" Margin="0,16,0,0"
+                                                            Visibility="{Binding CanPlay, Converter={StaticResource Visible}}">
+                                                    <Button Style="{StaticResource AccentButton}" Width="104" Margin="0,0,10,0"
+                                                            Command="{Binding DataContext.PlayHeaderCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                            CommandParameter="play">
+                                                        <StackPanel Orientation="Horizontal">
+                                                            <TextBlock Text="&#xE768;" FontFamily="{StaticResource Icons}" Margin="0,0,8,0" VerticalAlignment="Center" />
+                                                            <TextBlock Text="Play" />
+                                                        </StackPanel>
+                                                    </Button>
+                                                    <Button Style="{StaticResource AccentButton}" Width="104"
+                                                            Command="{Binding DataContext.PlayHeaderCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                            CommandParameter="shuffle">
+                                                        <StackPanel Orientation="Horizontal">
+                                                            <TextBlock Text="&#xE8B1;" FontFamily="{StaticResource Icons}" Margin="0,0,8,0" VerticalAlignment="Center" />
+                                                            <TextBlock Text="Shuffle" />
+                                                        </StackPanel>
+                                                    </Button>
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ContentControl.ContentTemplate>
+                            </ContentControl>
+                            <TextBlock Text="{Binding Page.Title}" FontSize="30" FontWeight="Bold" Margin="28,0,28,18"
+                                       Visibility="{Binding Page.HasHeader, Converter={StaticResource Visible}, ConverterParameter=Invert}" />
+                            <ItemsControl ItemsSource="{Binding Page.Sections}" ItemTemplateSelector="{StaticResource Sections}"
+                                          Focusable="False" />
+                        </StackPanel>
+                    </ScrollViewer>
+
+                    <!-- Loading, errors and empty pages -->
+                    <TextBlock Text="Loading…" Style="{StaticResource Secondary}" FontSize="13"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"
+                               Visibility="{Binding Loading, Converter={StaticResource Visible}}" />
+                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="420"
+                                Visibility="{Binding HasError, Converter={StaticResource Visible}}">
+                        <TextBlock Text="&#xE7BA;" FontFamily="{StaticResource Icons}" FontSize="34" Opacity="0.35" HorizontalAlignment="Center" />
+                        <TextBlock Text="{Binding Error}" TextWrapping="Wrap" TextAlignment="Center" Opacity="0.75" Margin="0,12" />
+                        <Button Style="{StaticResource AccentButton}" Content="Try Again" HorizontalAlignment="Center"
+                                Command="{Binding ReloadCommand}" />
+                    </StackPanel>
+                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
+                                Visibility="{Binding ShowSignInPrompt, Converter={StaticResource Visible}}">
+                        <TextBlock Text="Sign in to see your library." Opacity="0.75" Margin="0,0,0,12" HorizontalAlignment="Center" />
+                        <Button Style="{StaticResource AccentButton}" Content="Sign In" HorizontalAlignment="Center"
+                                Command="{Binding SignInCommand}" />
+                    </StackPanel>
+                    <TextBlock Text="Nothing here yet." Opacity="0.6" HorizontalAlignment="Center" VerticalAlignment="Center"
+                               Visibility="{Binding ShowEmpty, Converter={StaticResource Visible}}" />
+                </Grid>
+            </DockPanel>
+
+            <!-- Lyrics -->
+            <Border x:Name="LyricsPanel" Grid.Column="2" Width="330" BorderThickness="1,0,0,0" BorderBrush="{StaticResource Hover}"
+                    DataContext="{Binding Lyrics}">
+                <DockPanel>
+                    <StackPanel DockPanel.Dock="Top" Margin="20,18,20,12">
+                        <TextBlock Text="{Binding Heading}" FontSize="15" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Text="{Binding Track.Artist}" Style="{StaticResource Secondary}" FontSize="13" />
+                    </StackPanel>
+                    <TextBlock DockPanel.Dock="Bottom" Text="{Binding Source}" Style="{StaticResource Secondary}" FontSize="11"
+                               TextWrapping="Wrap" Margin="20,8" />
+                    <Grid>
+                        <StackPanel VerticalAlignment="Center" Margin="24"
+                                    Visibility="{Binding HasMessage, Converter={StaticResource Visible}}">
+                            <TextBlock Text="{Binding Message}" Opacity="0.6" TextWrapping="Wrap" TextAlignment="Center" />
+                            <Button Content="Try Again" HorizontalAlignment="Center" Margin="0,10,0,0"
+                                    Command="{Binding DataContext.RetryLyricsCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                    Visibility="{Binding IsFailed, Converter={StaticResource Visible}}" />
+                        </StackPanel>
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" Visibility="{Binding IsPlain, Converter={StaticResource Visible}}">
+                            <StackPanel Margin="20">
+                                <TextBlock Text="No time-synced lyrics for this version, so lines can’t be used to seek."
+                                           Style="{StaticResource Secondary}" TextWrapping="Wrap" Margin="0,0,0,12" />
+                                <TextBox Text="{Binding PlainText, Mode=OneWay}" IsReadOnly="True" BorderThickness="0"
+                                         Background="Transparent" TextWrapping="Wrap" FontSize="16" />
+                            </StackPanel>
+                        </ScrollViewer>
+                        <ScrollViewer x:Name="LyricsScroll" VerticalScrollBarVisibility="Auto"
+                                      Visibility="{Binding IsSynced, Converter={StaticResource Visible}}">
+                            <ItemsControl x:Name="LyricLines" ItemsSource="{Binding Lines}" Margin="10,120">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Button Style="{StaticResource Plain}" Padding="10,6" Margin="0,1"
+                                                Command="{Binding DataContext.SeekLineCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                CommandParameter="{Binding}" ToolTip="{Binding Stamp}"
+                                                AutomationProperties.Name="{Binding Text}"
+                                                AutomationProperties.HelpText="{Binding Stamp, StringFormat='Jumps to {0}'}">
+                                            <TextBlock Text="{Binding Text}" TextWrapping="Wrap" FontSize="19" FontWeight="SemiBold">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Opacity" Value="0.5" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsPast}" Value="True">
+                                                                <Setter Property="Opacity" Value="0.35" />
+                                                            </DataTrigger>
+                                                            <DataTrigger Binding="{Binding IsCurrent}" Value="True">
+                                                                <Setter Property="Opacity" Value="1" />
+                                                                <Setter Property="FontWeight" Value="Bold" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                        </Button>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </Grid>
+                </DockPanel>
+            </Border>
+
+            <!-- Player bar -->
+            <Border Grid.Row="1" Grid.ColumnSpan="3" Height="76" Padding="16,0" BorderThickness="0,1,0,0"
+                    BorderBrush="{StaticResource Hover}" Background="{StaticResource Wash}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center"
+                                IsEnabled="{Binding Now.IsEmpty, Converter={StaticResource Not}}">
+                        <Button Style="{StaticResource Icon}" Content="&#xE892;" Command="{Binding PreviousCommand}"
+                                ToolTip="Previous (Ctrl+Left)" AutomationProperties.Name="Previous" />
+                        <Button Style="{StaticResource Icon}" Content="{Binding Now.PlayGlyph}" FontSize="22" Width="44" Height="44"
+                                Command="{Binding PlayPauseCommand}" ToolTip="Play/Pause (Space)" AutomationProperties.Name="Play or Pause" />
+                        <Button Style="{StaticResource Icon}" Content="&#xE893;" Command="{Binding NextCommand}"
+                                ToolTip="Next (Ctrl+Right)" AutomationProperties.Name="Next" />
+                    </StackPanel>
+
+                    <Border Grid.Column="1" MaxWidth="600" Margin="16,8" Padding="8,6" CornerRadius="8" Background="{StaticResource Wash}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Rectangle Width="46" Height="46" RadiusX="5" RadiusY="5" Fill="{StaticResource Wash}" />
+                            <Rectangle Width="46" Height="46" RadiusX="5" RadiusY="5">
+                                <Rectangle.Fill>
+                                    <ImageBrush ImageSource="{Binding Now.Art, Converter={StaticResource Art}, ConverterParameter=92}" Stretch="UniformToFill" />
+                                </Rectangle.Fill>
+                            </Rectangle>
+                            <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="{Binding Now.DisplayTitle}" FontSize="13" FontWeight="SemiBold"
+                                               TextTrimming="CharacterEllipsis" MaxWidth="300" />
+                                    <TextBlock Text="{Binding Now.DisplayArtist}" Style="{StaticResource Secondary}" Margin="8,1,0,0"
+                                               MaxWidth="220" />
+                                </StackPanel>
+                                <Grid Margin="0,2,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="40" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="40" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock x:Name="ElapsedText" Text="0:00" Style="{StaticResource Secondary}" FontSize="10"
+                                               HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                    <Slider x:Name="Scrubber" Grid.Column="1" Margin="6,0" Minimum="0" Maximum="1"
+                                            IsMoveToPointEnabled="True" VerticalAlignment="Center"
+                                            IsEnabled="{Binding Now.IsEmpty, Converter={StaticResource Not}}"
+                                            AutomationProperties.Name="Playback position" />
+                                    <TextBlock Grid.Column="2" Text="{Binding Now.Duration, Converter={StaticResource Clock}}"
+                                               Style="{StaticResource Secondary}" FontSize="10" VerticalAlignment="Center" />
+                                </Grid>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Border x:Name="FormatBadge" Padding="6,2" CornerRadius="4" BorderThickness="1" BorderBrush="{StaticResource Hover}"
+                                Margin="0,0,10,0" VerticalAlignment="Center" ToolTip="Audio stream currently playing"
+                                Visibility="{Binding Now.HasFormat, Converter={StaticResource Visible}}">
+                            <TextBlock Text="{Binding Now.Format}" FontSize="10" Opacity="0.7" />
+                        </Border>
+                        <TextBlock x:Name="VolumeIcon" Text="&#xE767;" FontFamily="{StaticResource Icons}" Opacity="0.6"
+                                   VerticalAlignment="Center" />
+                        <Slider x:Name="VolumeSlider" Width="96" Minimum="0" Maximum="100" Margin="6,0,12,0" VerticalAlignment="Center"
+                                SmallChange="5" LargeChange="10" IsMoveToPointEnabled="True"
+                                AutomationProperties.Name="Volume" ToolTip="Volume (Ctrl+Up / Ctrl+Down, or scroll)" />
+                        <Button x:Name="LyricsButton" Style="{StaticResource Icon}" Content="&#xE7F0;" Command="{Binding ToggleLyricsCommand}"
+                                ToolTip="Lyrics (Ctrl+L)" AutomationProperties.Name="Show or hide lyrics" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </Grid>
+    </Grid>
+</Window>
