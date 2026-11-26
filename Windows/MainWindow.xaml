@@ -313,7 +313,7 @@
                             <ItemsControl ItemsSource="{Binding Library}">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
-                                        <Button Style="{StaticResource Plain}" Padding="10,7" Margin="0,1"
+                                        <Button Padding="10,7" Margin="0,1"
                                                 Command="{Binding DataContext.OpenCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                 CommandParameter="{Binding}" AutomationProperties.Name="{Binding Title}">
                                             <StackPanel Orientation="Horizontal">
