@@ -35,6 +35,47 @@ jobs:
           if (Test-Path "$env:LOCALAPPDATA\Cadenza\errors.log") { Get-Content "$env:LOCALAPPDATA\Cadenza\errors.log" }
           if (Select-String -Path selftest.log -Pattern "^\S+ FAIL" -Quiet) { exit 1 }
 
+      # MSIX package for the Microsoft Store. Identity values are placeholders until the app name
+      # is reserved in Partner Center; set them as repository variables then.
+      - name: Package MSIX
+        shell: pwsh
+        env:
+          IDENTITY_NAME: ${{ vars.MSIX_IDENTITY_NAME || 'Cadenza.Preview' }}
+          PUBLISHER: ${{ vars.MSIX_PUBLISHER || 'CN=Cadenza Preview' }}
+          PUBLISHER_DISPLAY_NAME: ${{ vars.MSIX_PUBLISHER_DISPLAY_NAME || 'Cadenza' }}
+        run: |
+          $version = ([xml](Get-Content Windows/Cadenza.Windows.csproj)).Project.PropertyGroup.Version | Select-Object -First 1
+          $layout = "msix"
+          New-Item -ItemType Directory $layout, "$layout/Assets" | Out-Null
+          Copy-Item out/* $layout -Recurse
+          Copy-Item Windows/Assets/*.png "$layout/Assets"
+          (Get-Content Windows/Package/AppxManifest.xml -Raw).
+            Replace('$IDENTITY_NAME$', $env:IDENTITY_NAME).Replace('$PUBLISHER$', $env:PUBLISHER).
+            Replace('$PUBLISHER_DISPLAY_NAME$', $env:PUBLISHER_DISPLAY_NAME).Replace('$VERSION$', "$version.0") |
+            Set-Content "$layout/AppxManifest.xml" -Encoding utf8
+          $sdk = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\10.*\x64" -Directory | Sort-Object Name -Descending | Select-Object -First 1
+          & "$($sdk.FullName)\makeappx.exe" pack /d $layout /p "Cadenza-$version-x64.msix" /o
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+          # Prove it installs: sign with a throwaway certificate, trust it, install, check, remove.
+          $cert = New-SelfSignedCertificate -Type Custom -Subject $env:PUBLISHER -KeyUsage DigitalSignature `
+            -CertStoreLocation Cert:\CurrentUser\My -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.3", "2.5.29.19={text}")
+          Copy-Item "Cadenza-$version-x64.msix" test.msix
+          & "$($sdk.FullName)\signtool.exe" sign /fd SHA256 /sha1 $cert.Thumbprint test.msix
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $store = New-Object System.Security.Cryptography.X509Certificates.X509Store "TrustedPeople", "LocalMachine"
+          $store.Open("ReadWrite"); $store.Add($cert); $store.Close()
+          Add-AppxPackage test.msix
+          $pkg = Get-AppxPackage -Name $env:IDENTITY_NAME
+          if (-not $pkg) { Write-Error "MSIX did not install"; exit 1 }
+          Write-Host "Installed $($pkg.PackageFullName)"
+          Remove-AppxPackage $pkg.PackageFullName
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Cadenza-msix
+          path: Cadenza-*.msix
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
