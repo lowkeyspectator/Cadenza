@@ -14,6 +14,14 @@
         <local:Artwork x:Key="Art" />
         <FontFamily x:Key="Icons">Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
         <SolidColorBrush x:Key="Accent" Color="#FA2E54" />
+        <!-- Cadenza's pink for the theme's accent-coloured parts (slider tracks, focus, selection). -->
+        <Color x:Key="SystemAccentColor">#FA2E54</Color>
+        <Color x:Key="SystemAccentColorLight1">#FB4F6E</Color>
+        <Color x:Key="SystemAccentColorLight2">#FC7089</Color>
+        <Color x:Key="SystemAccentColorLight3">#FD91A4</Color>
+        <Color x:Key="SystemAccentColorDark1">#D9203F</Color>
+        <Color x:Key="SystemAccentColorDark2">#B8172F</Color>
+        <Color x:Key="SystemAccentColorDark3">#970F20</Color>
         <SolidColorBrush x:Key="Hover" Color="#1A808080" />
         <SolidColorBrush x:Key="Wash" Color="#12808080" />
 

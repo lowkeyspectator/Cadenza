@@ -15,6 +15,7 @@ internal static class SelfTest
     public static async Task RunAsync(MainWindow window, AppViewModel vm, string logPath)
     {
         var log = new List<string>();
+        var botWall = false;
         void Note(string line)
         {
             log.Add($"{DateTime.Now:HH:mm:ss} {line}");
@@ -33,6 +34,7 @@ internal static class SelfTest
                 Note($"wait {i} {State()}");
             }
             Note("home " + State());
+            await Task.Delay(3000); // let artwork arrive
             Snapshot(window, logPath, "home");
             List<string> Songs() =>
                 vm.Page?.Sections.SelectMany(s => s.Items).Select(x => x.VideoId).OfType<string>().Distinct().ToList() ?? new();
@@ -44,7 +46,8 @@ internal static class SelfTest
                 vm.SubmitSearch();
                 for (var i = 0; i < 30 && (vm.Loading || vm.Page == null); i++) await Task.Delay(500);
                 Note("search " + State());
-                Snapshot(window, logPath, "search");
+                await Task.Delay(3000); // let artwork arrive
+            Snapshot(window, logPath, "search");
                 ids = Songs();
             }
             if (ids.Count < 2) { Note("FAIL no songs found"); return; }
@@ -65,12 +68,16 @@ internal static class SelfTest
                     " video: v ? { paused: v.paused, readyState: v.readyState, networkState: v.networkState, err: v.error && v.error.code, src: !!v.currentSrc } : null," +
                     " url: location.href }); })()");
                 Note("player " + probe);
+                if (probe.Contains("not a bot")) botWall = true;
                 vm.WebMode = true;
                 await Task.Delay(1500);
                 try { await window.Engine.CaptureAsync(Path.ChangeExtension(logPath, null) + "-webplayer.png"); } catch (Exception e) { Note("capture " + e.Message); }
                 vm.WebMode = false;
             }
-            Note(vm.Time > 1 ? "PASS playback time is advancing" : "FAIL playback time not advancing");
+            // YouTube asks datacenter addresses (like CI runners) to sign in first; playback can't be tested there.
+            Note(vm.Time > 1 ? "PASS playback time is advancing"
+                 : botWall ? "SKIP playback: YouTube's bot check blocks this network"
+                 : "FAIL playback time not advancing");
 
             vm.ShowLyrics = true;
             for (var i = 0; i < 10 && vm.Lyrics.Status is LyricsStatus.Loading or LyricsStatus.Idle; i++) await Task.Delay(1000);
@@ -78,11 +85,13 @@ internal static class SelfTest
             vm.SetVolume(40);
             await Task.Delay(2000);
             Note($"volume set 40 → model {vm.Volume}");
+            await Task.Delay(3000); // let artwork arrive
             Snapshot(window, logPath, "playing");
 
             vm.Open(Route.Browse("FEmusic_explore", "Explore"));
             for (var i = 0; i < 20 && (vm.Loading || vm.Page == null); i++) await Task.Delay(500);
             Note("explore " + State());
+            await Task.Delay(3000); // let artwork arrive
             Snapshot(window, logPath, "explore");
             vm.PlayPause();
             Note("DONE");
