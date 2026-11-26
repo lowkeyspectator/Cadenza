@@ -11,6 +11,7 @@ namespace Cadenza;
 public partial class MainWindow : Window
 {
     private readonly Engine engine;
+    internal Engine Engine => engine;
     private readonly AppViewModel vm;
     private bool settingSlider;      // a value set from the player, not by the user
     private bool keyboardNavigating; // Tab was used since the last click

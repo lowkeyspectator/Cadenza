@@ -141,6 +141,16 @@ public sealed class Engine
         return false;
     }
 
+    /// <summary>Runs a script in the player page and returns its JSON result (diagnostics).</summary>
+    public Task<string> EvaluateAsync(string script) => Core.ExecuteScriptAsync(script);
+
+    /// <summary>Saves a picture of the web player (diagnostics).</summary>
+    public async Task CaptureAsync(string path)
+    {
+        using var file = File.Create(path);
+        await Core.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, file);
+    }
+
     public void ReloadPlayer() => Core?.Navigate(Home.ToString());
     public void OpenSignIn() => Core?.Navigate(SignInUrl);
     public bool IsOnPlayer => web.CoreWebView2 != null && Uri.TryCreate(Core.Source, UriKind.Absolute, out var u) && IsPlayerHost(u.Host);

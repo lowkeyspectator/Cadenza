@@ -55,6 +55,21 @@ internal static class SelfTest
             vm.Play(ids[1], null);
             for (var i = 0; i < 12; i++) { await Task.Delay(1000); Note($"after {i} {State()}"); }
             Note(vm.Now.Id == ids[1] ? "PASS rapid play stayed on the second song" : $"FAIL now playing {vm.Now.Id}");
+            if (vm.Time <= 1)
+            {
+                // Why not? Player state, any error or bot-check message, and a picture of the page.
+                var probe = await window.Engine.EvaluateAsync(
+                    "(() => { const p = document.getElementById('movie_player'); const v = document.querySelector('video');" +
+                    " return JSON.stringify({ state: p && p.getPlayerState ? p.getPlayerState() : null," +
+                    " error: ((document.querySelector('.ytp-error, ytmusic-player .error, yt-playability-error-supported-renderers') || {}).innerText || '').slice(0, 300)," +
+                    " video: v ? { paused: v.paused, readyState: v.readyState, networkState: v.networkState, err: v.error && v.error.code, src: !!v.currentSrc } : null," +
+                    " url: location.href }); })()");
+                Note("player " + probe);
+                vm.WebMode = true;
+                await Task.Delay(1500);
+                try { await window.Engine.CaptureAsync(Path.ChangeExtension(logPath, null) + "-webplayer.png"); } catch (Exception e) { Note("capture " + e.Message); }
+                vm.WebMode = false;
+            }
             Note(vm.Time > 1 ? "PASS playback time is advancing" : "FAIL playback time not advancing");
 
             vm.ShowLyrics = true;
