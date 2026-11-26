@@ -1,5 +1,6 @@
 #!/bin/bash
 # Builds Cadenza.app into ./build using only the Swift toolchain (no Xcode project needed).
+# Optional: SIGN_ID="Developer ID Application: Name (TEAMID)" picks the signing identity.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -50,5 +51,18 @@ cat > "$APP/Contents/Info.plist" <<EOF
 </plist>
 EOF
 
-codesign --force --sign - "$APP"
+# Signing: a Developer ID identity (for notarized releases) if one is given or installed,
+# otherwise ad-hoc for local use. Set SIGN_ID=- to force ad-hoc.
+if [ -z "${SIGN_ID:-}" ]; then
+    SIGN_ID=$(security find-identity -v -p codesigning \
+        | sed -n 's/.*"\(Developer ID Application: .*\)"/\1/p' | head -1)
+fi
+if [ -n "${SIGN_ID:-}" ] && [ "$SIGN_ID" != "-" ]; then
+    # Hardened runtime and a secure timestamp are both required for notarization.
+    codesign --force --options runtime --timestamp --sign "$SIGN_ID" "$APP"
+    echo "Signed with $SIGN_ID"
+else
+    codesign --force --sign - "$APP"
+    echo "Signed ad-hoc (not notarizable)"
+fi
 echo "Built $APP"

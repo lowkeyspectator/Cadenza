@@ -100,7 +100,31 @@ To package a DMG (written to `build/Cadenza-<version>.dmg`):
 ./Scripts/make-dmg.sh
 ```
 
-Both produce a universal (Apple Silicon and Intel) app, ad-hoc signed for local use.
+Both produce a universal (Apple Silicon and Intel) app. It is signed with a Developer ID Application
+certificate if one is in your keychain (or the one named in `SIGN_ID`), otherwise ad-hoc for local use.
+
+### Notarized releases
+
+A notarized DMG opens on any Mac without the "Open Anyway" step. One-time setup, with an Apple
+Developer Program membership:
+
+1. Create a **Developer ID Application** certificate: Xcode ▸ Settings ▸ Accounts ▸ select the team ▸
+   Manage Certificates ▸ **+** ▸ Developer ID Application. Only the team's Account Holder can do this.
+2. Save notarization credentials in your keychain (it prompts for an app-specific password from
+   [account.apple.com](https://account.apple.com) ▸ Sign-In and Security ▸ App-Specific Passwords):
+
+   ```bash
+   xcrun notarytool store-credentials cadenza-notary --apple-id YOUR_APPLE_ID --team-id YOUR_TEAM_ID
+   ```
+
+Then each release:
+
+```bash
+NOTARY_PROFILE=cadenza-notary ./Scripts/make-dmg.sh
+```
+
+This signs the app with the hardened runtime, submits the DMG to Apple, waits for approval, and staples
+the ticket to the DMG.
 
 ## Limits
 
